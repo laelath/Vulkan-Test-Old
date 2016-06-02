@@ -27,7 +27,8 @@
 
 typedef struct _SwapchainBuffer {
 	VkImage image;
-	VkImageView imageView;
+	VkCommandBuffer cmd;
+	VkImageView view;
 } SwapchainBuffer;
 
 typedef struct _VulkanData {
@@ -45,6 +46,9 @@ typedef struct _VulkanData {
 	VkFormat format;
 	VkColorSpaceKHR colorSpace;
 	VkSwapchainKHR swapchain;
+	uint32_t swapchainImageCount;
+	uint32_t currentBuffer;
+
 	uint32_t enabledExtensionCount;
 	const char* enabledExtensionNames[64];
 
@@ -54,7 +58,8 @@ typedef struct _VulkanData {
 	VkCommandPool cmdPool;
 	VkCommandBuffer drawCmdBuffer;
 	//VkImage *images;
-	//SwapchainBuffer *buffers;
+	SwapchainBuffer *buffers;
+
 	PFN_vkGetPhysicalDeviceSurfaceSupportKHR fpGetPhysicalDeviceSurfaceSupportKHR;
 	PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR fpGetPhysicalDeviceSurfaceCapabilitiesKHR;
 	PFN_vkGetPhysicalDeviceSurfaceFormatsKHR fpGetPhysicalDeviceSurfaceFormatsKHR;
@@ -78,6 +83,11 @@ void glfw_error_callback(int error, const char* description)
 	fflush(stdout);
 }
 
+void setImageLayout(VulkanData *vkData, VkImage image, VkImageAspectFlags aspectMask, VkImageLayout oldImageLayout, VkImageLayout newImageLayout)
+{
+
+}
+
 void prepareBuffers(VulkanData *vkData)
 {
 	VkResult err;
@@ -87,14 +97,6 @@ void prepareBuffers(VulkanData *vkData)
 	VkSurfaceCapabilitiesKHR surfaceCapabilities;
 	err = vkData->fpGetPhysicalDeviceSurfaceCapabilitiesKHR(vkData->physicalDevice, vkData->surface, &surfaceCapabilities);
 	if (err) ERR_EXIT("Unable to query physical device surface capabilities\nExiting...\n");
-
-	uint32_t presentModeCount;
-	err = vkData->fpGetPhysicalDeviceSurfacePresentModesKHR(vkData->physicalDevice, vkData->surface, &presentModeCount, NULL);
-	if (err) ERR_EXIT("Unable to query physical device surface present mode count.\nExiting...\n");
-
-	VkPresentModeKHR *presentModes = malloc(presentModeCount * sizeof(VkPresentModeKHR));
-	err = vkData->fpGetPhysicalDeviceSurfacePresentModesKHR(vkData->physicalDevice, vkData->surface, &presentModeCount, presentModes);
-	if (err) ERR_EXIT("Unable to query physical device surface present modes.\nExiting...\n");
 
 	VkExtent2D swapchainExtent;
 	if(surfaceCapabilities.currentExtent.width == (uint32_t)-1)
@@ -109,6 +111,14 @@ void prepareBuffers(VulkanData *vkData)
 		vkData->height = surfaceCapabilities.currentExtent.height;
 	}
 
+	/*uint32_t presentModeCount;
+	err = vkData->fpGetPhysicalDeviceSurfacePresentModesKHR(vkData->physicalDevice, vkData->surface, &presentModeCount, NULL);
+	if (err) ERR_EXIT("Unable to query physical device surface present mode count.\nExiting...\n");
+
+	VkPresentModeKHR *presentModes = malloc(presentModeCount * sizeof(VkPresentModeKHR));
+	err = vkData->fpGetPhysicalDeviceSurfacePresentModesKHR(vkData->physicalDevice, vkData->surface, &presentModeCount, presentModes);
+	if (err) ERR_EXIT("Unable to query physical device surface present modes.\nExiting...\n");*/
+
 	VkPresentModeKHR swapchainPresentMode = VK_PRESENT_MODE_FIFO_KHR;
 
 	uint32_t desiredNumberOfSwapchainImages = surfaceCapabilities.minImageCount + 1;
@@ -121,48 +131,95 @@ void prepareBuffers(VulkanData *vkData)
 	else 
 		preTransform = surfaceCapabilities.currentTransform;
 
-	VkSwapchainCreateInfoKHR swapchain;
-	swapchain.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-	swapchain.pNext = NULL;
-	swapchain.surface = vkData->surface;
-	swapchain.minImageCount = desiredNumberOfSwapchainImages;
-	swapchain.imageFormat = vkData->format;
-	swapchain.imageColorSpace = vkData->colorSpace;
-	swapchain.imageExtent = swapchainExtent;
-	swapchain.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-	swapchain.preTransform = preTransform;
-	swapchain.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-	swapchain.imageArrayLayers = 1;
-	swapchain.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-	swapchain.queueFamilyIndexCount = 0;
-	swapchain.pQueueFamilyIndices = NULL;
-	swapchain.presentMode = swapchainPresentMode;
-	swapchain.oldSwapchain = oldSwapchain;
-	swapchain.clipped = VK_TRUE;
+	VkSwapchainCreateInfoKHR swapchain = {
+		.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+		.pNext = NULL,
+		.surface = vkData->surface,
+		.minImageCount = desiredNumberOfSwapchainImages,
+		.imageFormat = vkData->format,
+		.imageColorSpace = vkData->colorSpace,
+		.imageExtent = swapchainExtent,
+		.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+		.preTransform = preTransform,
+		.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+		.imageArrayLayers = 1,
+		.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
+		.queueFamilyIndexCount = 0,
+		.pQueueFamilyIndices = NULL,
+		.presentMode = swapchainPresentMode,
+		.oldSwapchain = oldSwapchain,
+		.clipped = VK_TRUE
+	};
 
 	err = vkData->fpCreateSwapchainKHR(vkData->device, &swapchain, NULL, &vkData->swapchain);
 	if (err) ERR_EXIT("Failed to create swapchain.\nExiting...\n");
+
+	if (oldSwapchain != VK_NULL_HANDLE)
+	{
+		printf("this will crash\n");
+		vkData->fpDestroySwapchainKHR(vkData->device, oldSwapchain, NULL);
+	}
+
+	err = vkData->fpGetSwapchainImagesKHR(vkData->device, vkData->swapchain, &vkData->swapchainImageCount, NULL);
+	if (err) ERR_EXIT("Failed to query the number of swapchain images.\nExiting...\n");
+
+	VkImage *swapchainImages = malloc(vkData->swapchainImageCount * sizeof(VkImage));
+	err = vkData->fpGetSwapchainImagesKHR(vkData->device, vkData->swapchain, &vkData->swapchainImageCount, swapchainImages);
+	if (err) ERR_EXIT("Faild to get swapchain images.\nExiting...\n");
+
+	vkData->buffers = malloc(vkData->swapchainImageCount * sizeof(SwapchainBuffer));
+
+	for (uint32_t i = 0; i < vkData->swapchainImageCount; ++i)
+	{
+		VkImageViewCreateInfo colorAttachmentView = {
+			.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+			.pNext = NULL,
+			.format = vkData->format,
+			.components = {
+				.r = VK_COMPONENT_SWIZZLE_R,
+				.g = VK_COMPONENT_SWIZZLE_G,
+				.b = VK_COMPONENT_SWIZZLE_B,
+				.a = VK_COMPONENT_SWIZZLE_A },
+			.subresourceRange = {
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.baseMipLevel = 0,
+				.levelCount = 1,
+				.baseArrayLayer = 0,
+				.layerCount = 1 },
+			.viewType = VK_IMAGE_VIEW_TYPE_2D,
+			.flags = 0
+		};
+
+		vkData->buffers[i].image = swapchainImages[i];
+		
+		setImageLayout(vkData, vkData->buffers[i].image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+	}
+
+	vkData->currentBuffer = 0;
+	free(swapchainImages);
 }
 
-void prepareVK(VulkanData *vkData)
+void initVKSwapchain(VulkanData *vkData)
 {
 	VkResult err;
 	
-	VkCommandPoolCreateInfo cmdPoolCreateInfo;
-	cmdPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-	cmdPoolCreateInfo.pNext = NULL;
-	cmdPoolCreateInfo.queueFamilyIndex = vkData->graphicsQueueNodeIndex;
-	cmdPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+	VkCommandPoolCreateInfo cmdPoolCreateInfo = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+		.pNext = NULL,
+		.queueFamilyIndex = vkData->graphicsQueueNodeIndex,
+		.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT
+	};
 
 	err = vkCreateCommandPool(vkData->device, &cmdPoolCreateInfo, NULL, &vkData->cmdPool);
 	if (err) ERR_EXIT("Failed to create command pool.\nExiting...\n");
 
-	VkCommandBufferAllocateInfo cmdBufferAllocInfo;
-	cmdBufferAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-	cmdBufferAllocInfo.pNext = NULL;
-	cmdBufferAllocInfo.commandPool = vkData->cmdPool;
-	cmdBufferAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-	cmdBufferAllocInfo.commandBufferCount = 1;
+	VkCommandBufferAllocateInfo cmdBufferAllocInfo = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+		.pNext = NULL,
+		.commandPool = vkData->cmdPool,
+		.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+		.commandBufferCount = 1
+	};
 
 	err = vkAllocateCommandBuffers(vkData->device, &cmdBufferAllocInfo, &vkData->drawCmdBuffer);
 	if (err) ERR_EXIT("Failed to allocate draw command buffer.\nExiting...\n");
@@ -196,25 +253,25 @@ void initVK(VulkanData *vkData)
 	//vkData->enabledExtensionCount = requiredExtensionCount;
 	
 	//Create Vulkan Instance
-	VkApplicationInfo appInfo;
-	VkInstanceCreateInfo instanceInfo;
-	//VkInstance instance;
+	VkApplicationInfo appInfo = {
+		.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+		.pNext = NULL,
+		.pApplicationName = "Vulkan Test",
+		.pEngineName = "Test Engine",
+		.engineVersion = 1,
+		.apiVersion = VK_API_VERSION_1_0
+	};
 	
-	appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-	appInfo.pNext = NULL;
-	appInfo.pApplicationName = "Vulkan Test";
-	appInfo.pEngineName = "Test Engine";
-	appInfo.engineVersion = 1;
-	appInfo.apiVersion = VK_API_VERSION_1_0;
-	
-	instanceInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-	instanceInfo.pNext = NULL;
-	instanceInfo.flags = 0;
-	instanceInfo.pApplicationInfo = &appInfo;
-	instanceInfo.enabledLayerCount = 0;
-	instanceInfo.ppEnabledLayerNames = NULL;
-	instanceInfo.enabledExtensionCount = vkData->enabledExtensionCount;//requiredExtensionCount;
-	instanceInfo.ppEnabledExtensionNames = vkData->enabledExtensionNames;//requiredExtensions;
+	VkInstanceCreateInfo instanceInfo = {
+		.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.pApplicationInfo = &appInfo,
+		.enabledLayerCount = 0,
+		.ppEnabledLayerNames = NULL,
+		.enabledExtensionCount = vkData->enabledExtensionCount,//requiredExtensionCount;
+		.ppEnabledExtensionNames = vkData->enabledExtensionNames//requiredExtensions;
+	};
 
 	//Creating Vulkan Instance
 	err = vkCreateInstance(&instanceInfo, NULL, &vkData->instance);
@@ -295,22 +352,25 @@ void initDevice(VulkanData *vkData)
 	VkResult err;
 
 	float queuePriorities[1] = {0.0f};
-	VkDeviceQueueCreateInfo queue;
-	queue.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-	queue.pNext = NULL;
-	queue.queueFamilyIndex = vkData->graphicsQueueNodeIndex;
-	queue.queueCount = 1;
-	queue.pQueuePriorities = queuePriorities;
 
-	VkDeviceCreateInfo device;
-	device.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-	device.pNext = NULL;
-	device.queueCreateInfoCount = 1;
-	device.pQueueCreateInfos = &queue;
-	device.enabledLayerCount = 0;
-	device.ppEnabledLayerNames = NULL;
-	device.enabledExtensionCount = vkData->enabledExtensionCount;
-	device.ppEnabledExtensionNames = vkData->enabledExtensionNames;
+	VkDeviceQueueCreateInfo queue = {
+		.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+		.pNext = NULL,
+		.queueFamilyIndex = vkData->graphicsQueueNodeIndex,
+		.queueCount = 1,
+		.pQueuePriorities = queuePriorities
+	};
+
+	VkDeviceCreateInfo device = {
+		.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+		.pNext = NULL,
+		.queueCreateInfoCount = 1,
+		.pQueueCreateInfos = &queue,
+		.enabledLayerCount = 0,
+		.ppEnabledLayerNames = NULL,
+		.enabledExtensionCount = vkData->enabledExtensionCount,
+		.ppEnabledExtensionNames = vkData->enabledExtensionNames
+	};
 
 	err = vkCreateDevice(vkData->physicalDevice, &device, NULL, &vkData->device);
 	if (err) ERR_EXIT("Failed to create a Vulkan device.\nExiting...\n");
@@ -396,6 +456,25 @@ void initSurface(VulkanData *vkData, GLFWwindow *window)
 
 void destroyVulkan(VulkanData *vkData)
 {
+	//for (uint32_t i = 0; i < vkData->swapchainImageCount; ++i)
+	//	vkDestroyFramebuffer(vkData->device, vkData->framebuffers[i], NULL);
+	//free(vkData->framebuffers);
+
+	//vkDestroyDescriptorPool(vkData->device, vkData->descPool, NULL);
+
+	//if (vkData->setupCmd)
+	//	vkFreeCommandBuffers(vkData->device, vkData->cmdPool, 1, &vkData->setupCmd);
+
+	//vkFreeCommandBuffers(vkData->device, vkData->cmdPool, 1, &vkData->drawCmd);
+	//vkDestroyCommandPool(vkData->device, vkData->cmdPool, NULL);
+
+	//vkDestroyImageView(vkData->device, vkData->depth.view, NULL);
+	//vkDestroyImage(vkData->device, vkData->depth.image, NULL);
+	//vkFreeMemory(vkData->device, vkData->depth.mem, NULL);
+	
+	vkData->fpDestroySwapchainKHR(vkData->device, vkData->swapchain, NULL);
+	free(vkData->buffers);
+
 	vkDestroyDevice(vkData->device, NULL);
 	vkDestroySurfaceKHR(vkData->instance, vkData->surface, NULL);
 	vkDestroyInstance(vkData->instance, NULL);
@@ -405,7 +484,7 @@ void destroyVulkan(VulkanData *vkData)
 
 void initWindow(Window *window)
 {
-	//memset(window, 0, sizeof(window));
+	memset(window, 0, sizeof(Window));
 
 	glfwSetErrorCallback(glfw_error_callback);
 
@@ -429,6 +508,8 @@ void initWindow(Window *window)
 	//glfwSetKeyCallback(window->glfwWindow, );
 	
 	initSurface(&window->vkData, window->glfwWindow);
+
+	initVKSwapchain(&window->vkData);
 }
 
 void destroyWindow(Window *window)
