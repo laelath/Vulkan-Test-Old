@@ -1,10 +1,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 
 //#define GLFW_INCLUDE_VULKAN
 #include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
+
+#define VERTEX_BUFFER_BIND_ID 0
 
 #define ERR_EXIT(err_msg) \
 { \
@@ -22,7 +25,7 @@
 #define GET_DEVICE_PROC_ADDR(vkData, entrypoint) \
 { \
 	vkData->fp##entrypoint = (PFN_vk##entrypoint)vkGetDeviceProcAddr(vkData->device, "vk" #entrypoint); \
-	if (vkData->fp##entrypoint == NULL) ERR_EXIT("vkGetDeviceProcAddr failed to find vk" #entrypoint ".\nExiting...\n");\
+	if (vkData->fp##entrypoint == NULL) ERR_EXIT("vkGetDeviceProcAddr failed to find vk" #entrypoint ".\nExiting...\n"); \
 }
 
 typedef struct _SwapchainBuffer {
@@ -38,9 +41,9 @@ typedef struct _VulkanData {
 	VkPhysicalDeviceProperties physicalDeviceProps;
 	VkPhysicalDeviceMemoryProperties memoryProps;
 	VkQueue queue;
+	VkQueueFamilyProperties *queueProps;
 	uint32_t queueCount;
 	uint32_t graphicsQueueNodeIndex;
-	VkQueueFamilyProperties *queueProps;
 
 	VkSurfaceKHR surface;
 	VkFormat format;
@@ -57,8 +60,21 @@ typedef struct _VulkanData {
 
 	VkCommandPool cmdPool;
 	VkCommandBuffer drawCmdBuffer;
-	//VkImage *images;
+	VkCommandBuffer setupCmdBuffer;
 	SwapchainBuffer *buffers;
+
+	VkRenderPass renderPass;
+	VkPipeline pipeline;
+	VkPipelineLayout pipelineLayout;
+
+	struct {
+		VkBuffer buffer;
+		VkDeviceMemory memory;
+		
+		VkPipelineVertexInputStateCreateInfo vertexInputInfo;
+		VkVertexInputBindingDescription vertexInputBindings[1];
+		VkVertexInputAttributeDescription vertexInputAttributes[2];
+	} vertices;
 
 	PFN_vkGetPhysicalDeviceSurfaceSupportKHR fpGetPhysicalDeviceSurfaceSupportKHR;
 	PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR fpGetPhysicalDeviceSurfaceCapabilitiesKHR;
@@ -74,7 +90,6 @@ typedef struct _VulkanData {
 typedef struct _Window {
 	GLFWwindow* glfwWindow;
 	VulkanData vkData;
-	//uint32_t width, height;
 } Window;
 
 void glfw_error_callback(int error, const char* description)
@@ -83,9 +98,56 @@ void glfw_error_callback(int error, const char* description)
 	fflush(stdout);
 }
 
-void setImageLayout(VulkanData *vkData, VkImage image, VkImageAspectFlags aspectMask, VkImageLayout oldImageLayout, VkImageLayout newImageLayout)
+void glfw_key_callback(GLFWwindow *window, int key, int scancode, int action, int mods)
 {
+	if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
+		glfwSetWindowShouldClose(window, GLFW_TRUE);
+}
 
+static void setImageLayout(VulkanData *vkData, VkImage image, VkImageAspectFlags aspectMask, VkImageLayout oldImageLayout, VkImageLayout newImageLayout)
+{
+	VkResult err;
+
+	VkImageMemoryBarrier imageMemoryBarrier = {
+		.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+		.pNext = NULL,
+		.srcAccessMask = 0,
+		.dstAccessMask = 0,
+		.oldLayout = oldImageLayout,
+		.newLayout = newImageLayout,
+		.image = image,
+		.subresourceRange = {aspectMask, 0, 1, 0, 1}
+	};
+
+	if (newImageLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
+		imageMemoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+	if (newImageLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
+		imageMemoryBarrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+	if (newImageLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+		imageMemoryBarrier.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+	if (newImageLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+		imageMemoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_INPUT_ATTACHMENT_READ_BIT;
+
+	VkPipelineStageFlags srcStages = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+	VkPipelineStageFlags dstStages = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+
+	vkCmdPipelineBarrier(vkData->setupCmdBuffer, srcStages, dstStages, 0, 0, NULL, 0, NULL, 1, &imageMemoryBarrier);
+}
+
+static bool memoryTypeFromProperties(VulkanData *vkData, uint32_t typeBits, VkFlags requirementsMask, uint32_t *typeIndex)
+{
+	for (uint32_t i = 0; i < 32; i++)
+	{
+		if ((typeBits & 1) == 1)
+		{
+			if ((vkData->memoryProps.memoryTypes[i].propertyFlags & requirementsMask) == requirementsMask)
+			{
+				*typeIndex = i;
+				return true;
+			}
+		}
+		typeBits >>= 1;
+	}
 }
 
 void prepareBuffers(VulkanData *vkData)
@@ -134,6 +196,7 @@ void prepareBuffers(VulkanData *vkData)
 	VkSwapchainCreateInfoKHR swapchain = {
 		.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
 		.pNext = NULL,
+		.flags = 0,
 		.surface = vkData->surface,
 		.minImageCount = desiredNumberOfSwapchainImages,
 		.imageFormat = vkData->format,
@@ -156,7 +219,6 @@ void prepareBuffers(VulkanData *vkData)
 
 	if (oldSwapchain != VK_NULL_HANDLE)
 	{
-		printf("this will crash\n");
 		vkData->fpDestroySwapchainKHR(vkData->device, oldSwapchain, NULL);
 	}
 
@@ -174,6 +236,7 @@ void prepareBuffers(VulkanData *vkData)
 		VkImageViewCreateInfo colorAttachmentView = {
 			.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
 			.pNext = NULL,
+			.flags = 0,
 			.format = vkData->format,
 			.components = {
 				.r = VK_COMPONENT_SWIZZLE_R,
@@ -187,7 +250,6 @@ void prepareBuffers(VulkanData *vkData)
 				.baseArrayLayer = 0,
 				.layerCount = 1 },
 			.viewType = VK_IMAGE_VIEW_TYPE_2D,
-			.flags = 0
 		};
 
 		vkData->buffers[i].image = swapchainImages[i];
@@ -199,13 +261,232 @@ void prepareBuffers(VulkanData *vkData)
 	free(swapchainImages);
 }
 
-void initVKSwapchain(VulkanData *vkData)
+void prepareVertices(VulkanData *vkData)
+{
+	const float vertices[18] = {
+		0.0f, 1.0f, 1.0f, 	1.0f, 0.0f, 0.0f,
+		0.75f, -1.0f, 1.0f, 	0.0f, 1.0f, 0.0f,
+		-0.75f, -1.0f, 1.0f, 	0.0f, 0.0f, 1.0f
+	};
+
+	VkBufferCreateInfo bufferInfo = {
+		.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.size = sizeof(vertices),
+		.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+	};
+
+	VkMemoryAllocateInfo memAllocInfo = {
+		.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+		.pNext = NULL,
+		.allocationSize = 0,
+		.memoryTypeIndex = 0
+	};
+
+	VkMemoryRequirements memoryRequirements;
+	VkResult err;
+	void *data;
+
+	err = vkCreateBuffer(vkData->device, &bufferInfo, NULL, &vkData->vertices.buffer);
+	if (err) ERR_EXIT("Unable to create vertex buffer.\nExiting...\n");
+
+	vkGetBufferMemoryRequirements(vkData->device, vkData->vertices.buffer, &memoryRequirements);
+
+	memAllocInfo.allocationSize = memoryRequirements.size;
+	if (!memoryTypeFromProperties(vkData, memoryRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, &memAllocInfo.memoryTypeIndex))
+		ERR_EXIT("Unable to find suitable memory type for vertex buffer.\nExiting...\n");
+
+	err = vkAllocateMemory(vkData->device, &memAllocInfo, NULL, &vkData->vertices.memory);
+	if (err) ERR_EXIT("Unable to allocate memory for vertex buffer.\nExiting...\n");
+
+	err = vkMapMemory(vkData->device, vkData->vertices.memory, 0, memAllocInfo.allocationSize, 0, &data);
+	if (err) ERR_EXIT("Unable to map memory for vertex buffer.\nExiting...\n");
+
+	memcpy(data, vertices, sizeof(vertices));
+
+	vkUnmapMemory(vkData->device, vkData->vertices.memory);
+	
+	err = vkBindBufferMemory(vkData->device, vkData->vertices.buffer, vkData->vertices.memory, 0);
+	if (err) ERR_EXIT("Unable to bind mapped vertex memory to buffer.\nExiting...\n");
+
+	vkData->vertices.vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+	vkData->vertices.vertexInputInfo.pNext = NULL;
+	vkData->vertices.vertexInputInfo.flags = 0;
+	vkData->vertices.vertexInputInfo.vertexBindingDescriptionCount = 1;
+	vkData->vertices.vertexInputInfo.pVertexBindingDescriptions = vkData->vertices.vertexInputBindings;
+	vkData->vertices.vertexInputInfo.vertexAttributeDescriptionCount = 2;
+	vkData->vertices.vertexInputInfo.pVertexAttributeDescriptions = vkData->vertices.vertexInputAttributes;
+	
+	vkData->vertices.vertexInputBindings[0].binding = VERTEX_BUFFER_BIND_ID;
+	vkData->vertices.vertexInputBindings[0].stride = sizeof(vertices[0]) * 6;
+	vkData->vertices.vertexInputBindings[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+	vkData->vertices.vertexInputAttributes[0].binding = VERTEX_BUFFER_BIND_ID;
+	vkData->vertices.vertexInputAttributes[0].location = 0;
+	vkData->vertices.vertexInputAttributes[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+	vkData->vertices.vertexInputAttributes[0].offset = 0;
+
+	vkData->vertices.vertexInputAttributes[1].binding = VERTEX_BUFFER_BIND_ID;
+	vkData->vertices.vertexInputAttributes[1].location = 1;
+	vkData->vertices.vertexInputAttributes[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+	vkData->vertices.vertexInputAttributes[1].offset = sizeof(vertices[0]) * 3;
+}
+
+void prepareRenderPass(VulkanData *vkData)
+{
+	VkAttachmentDescription attachments[1] = {
+		[0] = {
+			.format = vkData->format,
+			.samples = VK_SAMPLE_COUNT_1_BIT,
+			.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+			.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+			.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+		}
+	};
+
+	VkAttachmentReference colorReference = {
+		.attachment = 0,
+		.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+	};
+
+	VkSubpassDescription subpass = {
+		.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
+		.flags = 0,
+		.inputAttachmentCount = 0,
+		.pInputAttachments = NULL,
+		.colorAttachmentCount = 1,
+		.pColorAttachments = &colorReference,
+		.pResolveAttachments = NULL,
+		.pDepthStencilAttachment = NULL,
+		.preserveAttachmentCount = 0,
+		.pPreserveAttachments = NULL
+	};
+
+	VkRenderPassCreateInfo renderPassInfo = {
+		.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.attachmentCount = 1,
+		.pAttachments = attachments,
+		.subpassCount = 1,
+		.pSubpasses = &subpass,
+		.dependencyCount = 0,
+		.pDependencies = NULL
+	};
+
+	VkResult err;
+	err = vkCreateRenderPass(vkData->device, &renderPassInfo, NULL, &vkData->renderPass);
+	if (err) ERR_EXIT("Unable to create render pass.\nExiting...\n");
+}
+
+void preparePipeline(VulkanData *vkData)
+{
+	VkResult err;
+
+	VkDynamicState dynamicStateEnables[2] = {
+		VK_DYNAMIC_STATE_VIEWPORT,
+		VK_DYNAMIC_STATE_SCISSOR
+	};
+
+	VkPipelineDynamicStateCreateInfo dynamicState = {
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.dynamicStateCount = 2,
+		.pDynamicStates = dynamicStateEnables
+	};
+
+	VkGraphicsPipelineCreateInfo pipeline = {
+		.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.layout = vkData->pipelineLayout
+	};
+
+	VkPipelineInputAssemblyStateCreateInfo inputAssembly = {
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+	};
+
+	VkPipelineRasterizationStateCreateInfo rasterState = {
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.polygonMode = VK_POLYGON_MODE_FILL,
+		.cullMode = VK_CULL_MODE_BACK_BIT,
+		.frontFace = VK_FRONT_FACE_CLOCKWISE,
+		.depthClampEnable = VK_FALSE,
+		.rasterizerDiscardEnable = VK_FALSE,
+		.depthBiasEnable = VK_FALSE
+	};
+
+	VkPipelineColorBlendAttachmentState colorBlendAttachments[1] = {
+		[0] = {
+			.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT,
+			.blendEnable = VK_FALSE
+		}
+	};
+
+	VkPipelineColorBlendStateCreateInfo colorBlend = {
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.attachmentCount = 1,
+		.pAttachments = colorBlendAttachments
+	};
+
+	VkPipelineViewportStateCreateInfo viewport = {
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.viewportCount = 1,
+		.scissorCount = 1
+	};
+
+	VkPipelineMultisampleStateCreateInfo multisampleState = {
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+		.sampleShadingEnable = VK_FALSE,
+		.pSampleMask = NULL,
+		.alphaToCoverageEnable = VK_FALSE,
+		.alphaToOneEnable = VK_FALSE
+	};
+
+	VkPipelineShaderStageCreateInfo shaderStages[2] = {
+		[0] = {
+			.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+			.pNext = NULL,
+			.flags = 0,
+			.stage = VK_SHADER_STAGE_VERTEX_BIT,
+			//.module = prepareVertexShader(vkData),
+			.pName = "main" },
+		[1] = {
+			.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+			.pNext = NULL,
+			.flags = 0,
+			.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+			//.module = prepareFragmentShader(vkData),
+			.pName = "main" }
+	};
+}
+
+void prepareSwapchain(VulkanData *vkData)
 {
 	VkResult err;
 	
+	//Create command pool
 	VkCommandPoolCreateInfo cmdPoolCreateInfo = {
 		.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
 		.pNext = NULL,
+		.flags = 0,
 		.queueFamilyIndex = vkData->graphicsQueueNodeIndex,
 		.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT
 	};
@@ -213,6 +494,7 @@ void initVKSwapchain(VulkanData *vkData)
 	err = vkCreateCommandPool(vkData->device, &cmdPoolCreateInfo, NULL, &vkData->cmdPool);
 	if (err) ERR_EXIT("Failed to create command pool.\nExiting...\n");
 
+	//Create draw command buffer
 	VkCommandBufferAllocateInfo cmdBufferAllocInfo = {
 		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
 		.pNext = NULL,
@@ -224,12 +506,46 @@ void initVKSwapchain(VulkanData *vkData)
 	err = vkAllocateCommandBuffers(vkData->device, &cmdBufferAllocInfo, &vkData->drawCmdBuffer);
 	if (err) ERR_EXIT("Failed to allocate draw command buffer.\nExiting...\n");
 
+	//Create setup command buffer
+	VkCommandBufferAllocateInfo cmdInfo = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+		.pNext = NULL,
+		.commandPool = vkData->cmdPool,
+		.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+		.commandBufferCount = 1
+	};
+
+	err = vkAllocateCommandBuffers(vkData->device, &cmdInfo, &vkData->setupCmdBuffer);
+	if (err) ERR_EXIT("Failed to allocate command buffers.\nExiting...\n");
+
+	//Start setup command buffer
+	VkCommandBufferInheritanceInfo cmdInheritInfo = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO,
+		.pNext = NULL,
+		.renderPass = VK_NULL_HANDLE,
+		.subpass = 0,
+		.framebuffer = VK_NULL_HANDLE,
+		.occlusionQueryEnable = VK_FALSE,
+		.queryFlags = 0,
+		.pipelineStatistics = 0
+	};
+
+	VkCommandBufferBeginInfo cmdBeginInfo = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.pInheritanceInfo = &cmdInheritInfo
+	};
+
+	err = vkBeginCommandBuffer(vkData->setupCmdBuffer, &cmdBeginInfo);
+	if (err) ERR_EXIT("Failed to start setup command buffer.\nExiting...\n");
+
 	prepareBuffers(vkData);
 	//prepareDepth(vkData);
-	//prepareVertices(vkData);
+	prepareVertices(vkData);
 	//prepareDescriptorLayout(vkData);
-	//prepareRenderPass(vkData);
-	//preparePipeline(vkData);
+	prepareRenderPass(vkData);
+	preparePipeline(vkData);
 
 	//prepareDescriptorPool(vkData);
 	//prepareDescriptorSet(vkData);
@@ -250,8 +566,6 @@ void initVK(VulkanData *vkData)
 	for (uint32_t i = 0; i < requiredExtensionCount; ++i)
 		vkData->enabledExtensionNames[vkData->enabledExtensionCount++] = requiredExtensions[i];
 
-	//vkData->enabledExtensionCount = requiredExtensionCount;
-	
 	//Create Vulkan Instance
 	VkApplicationInfo appInfo = {
 		.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
@@ -269,8 +583,8 @@ void initVK(VulkanData *vkData)
 		.pApplicationInfo = &appInfo,
 		.enabledLayerCount = 0,
 		.ppEnabledLayerNames = NULL,
-		.enabledExtensionCount = vkData->enabledExtensionCount,//requiredExtensionCount;
-		.ppEnabledExtensionNames = vkData->enabledExtensionNames//requiredExtensions;
+		.enabledExtensionCount = vkData->enabledExtensionCount,
+		.ppEnabledExtensionNames = vkData->enabledExtensionNames
 	};
 
 	//Creating Vulkan Instance
@@ -283,32 +597,20 @@ void initVK(VulkanData *vkData)
 	if (err) ERR_EXIT("Failed to query the number of physical devices present.\nExiting...\n");
 	if (physicalDeviceCount == 0) ERR_EXIT("No physcial devices were found with Vulkan support.\nExiting...\n");
 	
-	//printf("Physical devices: %i\n", physicalDeviceCount);
-	
 	//Selecting the render device
 	VkPhysicalDevice *physicalDevices = malloc(sizeof(VkPhysicalDevice) * physicalDeviceCount);
 	err = vkEnumeratePhysicalDevices(vkData->instance, &physicalDeviceCount, physicalDevices);
 	if (err) ERR_EXIT("Failed to retrieve physcial device properties.\nExiting...\n");
 	
 	//Just grabbing the first device present
-	//VkPhysicalDevice device = physicalDevices[0];
 	vkData->physicalDevice = physicalDevices[0];
 
 	free(physicalDevices);
 
-	//VkPhysicalDeviceProperties vkData->physicalDeviceProperties;
 	vkGetPhysicalDeviceProperties(vkData->physicalDevice, &vkData->physicalDeviceProps);
 	
-	/*printf("Found device: %s\n", vkData->physicalDeviceProps.deviceName);
-	printf("Driver version: %d\n", vkData->physicalDeviceProps.driverVersion);
-	printf("Device type: %d\n", vkData->physicalDeviceProps.deviceType);
-	printf("API version: %d.%d.%d\n", 
-			(vkData->physicalDeviceProps.apiVersion>>22)&0x3FF,
-			(vkData->physicalDeviceProps.apiVersion>>12)&0x3FF, 
-			(vkData->physicalDeviceProps.apiVersion&0xFFF));*/
-
 	uint32_t deviceExtensionCount = 0;
-	VkBool32 vkDataExtFound = VK_FALSE;
+	bool swapchainExtFound = false;
 	vkData->enabledExtensionCount = 0;
 
 	err = vkEnumerateDeviceExtensionProperties(vkData->physicalDevice, NULL, &deviceExtensionCount, NULL);
@@ -320,11 +622,11 @@ void initVK(VulkanData *vkData)
 		err = vkEnumerateDeviceExtensionProperties(vkData->physicalDevice, NULL, &deviceExtensionCount, deviceExtensionProps);
 		if (err) ERR_EXIT("Unable to query device extension properties.\nExiting...\n");
 
-		for (uint32_t i = 0; i < deviceExtensionCount && !vkDataExtFound; ++i)
+		for (uint32_t i = 0; i < deviceExtensionCount && !swapchainExtFound; ++i)
 		{
 			if (!strcmp(VK_KHR_SWAPCHAIN_EXTENSION_NAME, deviceExtensionProps[i].extensionName))
 			{
-				vkDataExtFound = VK_TRUE;
+				swapchainExtFound = true;
 				vkData->enabledExtensionNames[vkData->enabledExtensionCount++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
 			}
 		}
@@ -394,7 +696,7 @@ void initSurface(VulkanData *vkData, GLFWwindow *window)
 
 	uint32_t graphicsQueueNodeIndex = UINT32_MAX;
 	uint32_t presentQueueNodeIndex = UINT32_MAX;
-	VkBool32 foundQueue = 0;
+	bool foundQueue = false;
 	for (uint32_t i = 0; i < vkData->queueCount && !foundQueue; ++i)
 	{
 		if ((vkData->queueProps[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0)
@@ -406,20 +708,20 @@ void initSurface(VulkanData *vkData, GLFWwindow *window)
 			{
 				graphicsQueueNodeIndex = i;
 				presentQueueNodeIndex = i;
-				foundQueue = 1;
+				foundQueue = true;
 			}
 		}
 	}
 
 	if (presentQueueNodeIndex == UINT32_MAX)
 	{
-		foundQueue = 0;
+		foundQueue = false;
 		for (uint32_t i = 0; i < vkData->queueCount && !foundQueue; ++i)
 		{
 			if (supportsPresent[i] == VK_TRUE)
 			{
 				presentQueueNodeIndex = i;
-				foundQueue = 1;
+				foundQueue = true;
 			}
 		}
 	}
@@ -427,6 +729,7 @@ void initSurface(VulkanData *vkData, GLFWwindow *window)
 	free(supportsPresent);
 
 	if (graphicsQueueNodeIndex == UINT32_MAX || presentQueueNodeIndex == UINT32_MAX) ERR_EXIT("Could not find graphics and present queues.\nExiting...\n");
+	//Possible to use separate queues for graphics and present, but this implementation doesn't incude that
 	if (graphicsQueueNodeIndex != presentQueueNodeIndex) ERR_EXIT("Could not find a common graphics and present queue.\nExiting...\n");
 
 	vkData->graphicsQueueNodeIndex = graphicsQueueNodeIndex;
@@ -454,34 +757,6 @@ void initSurface(VulkanData *vkData, GLFWwindow *window)
 	vkGetPhysicalDeviceMemoryProperties(vkData->physicalDevice, &vkData->memoryProps);
 }
 
-void destroyVulkan(VulkanData *vkData)
-{
-	//for (uint32_t i = 0; i < vkData->swapchainImageCount; ++i)
-	//	vkDestroyFramebuffer(vkData->device, vkData->framebuffers[i], NULL);
-	//free(vkData->framebuffers);
-
-	//vkDestroyDescriptorPool(vkData->device, vkData->descPool, NULL);
-
-	//if (vkData->setupCmd)
-	//	vkFreeCommandBuffers(vkData->device, vkData->cmdPool, 1, &vkData->setupCmd);
-
-	//vkFreeCommandBuffers(vkData->device, vkData->cmdPool, 1, &vkData->drawCmd);
-	//vkDestroyCommandPool(vkData->device, vkData->cmdPool, NULL);
-
-	//vkDestroyImageView(vkData->device, vkData->depth.view, NULL);
-	//vkDestroyImage(vkData->device, vkData->depth.image, NULL);
-	//vkFreeMemory(vkData->device, vkData->depth.mem, NULL);
-	
-	vkData->fpDestroySwapchainKHR(vkData->device, vkData->swapchain, NULL);
-	free(vkData->buffers);
-
-	vkDestroyDevice(vkData->device, NULL);
-	vkDestroySurfaceKHR(vkData->instance, vkData->surface, NULL);
-	vkDestroyInstance(vkData->instance, NULL);
-
-	free(vkData->queueProps);
-}
-
 void initWindow(Window *window)
 {
 	memset(window, 0, sizeof(Window));
@@ -505,11 +780,45 @@ void initWindow(Window *window)
 	glfwSetWindowUserPointer(window->glfwWindow, window);
 	//glfwSetWindowRefreshCallback(window->glfwWindow, );
 	//glfwSetFramebufferSizeCallback(window->glfwWindow, );
-	//glfwSetKeyCallback(window->glfwWindow, );
+	glfwSetKeyCallback(window->glfwWindow, glfw_key_callback);
 	
 	initSurface(&window->vkData, window->glfwWindow);
 
-	initVKSwapchain(&window->vkData);
+	prepareSwapchain(&window->vkData);
+}
+
+void destroyVulkan(VulkanData *vkData)
+{
+	//for (uint32_t i = 0; i < vkData->swapchainImageCount; ++i)
+	//	vkDestroyFramebuffer(vkData->device, vkData->framebuffers[i], NULL);
+	//free(vkData->framebuffers);
+
+	//vkDestroyDescriptorPool(vkData->device, vkData->descPool, NULL);
+
+	//if (vkData->setupCmdBuffer)
+		vkFreeCommandBuffers(vkData->device, vkData->cmdPool, 1, &vkData->setupCmdBuffer);
+
+	vkFreeCommandBuffers(vkData->device, vkData->cmdPool, 1, &vkData->drawCmdBuffer);
+	vkDestroyCommandPool(vkData->device, vkData->cmdPool, NULL);
+
+	//vkDestroyPipeline(vkData->device, vkData->pipeline, NULL);
+	vkDestroyRenderPass(vkData->device, vkData->renderPass, NULL);
+	//vkDestroyPipelineLayout(vkData->device, vkData->pipelineLayout, NULL);
+
+	vkDestroyBuffer(vkData->device, vkData->vertices.buffer, NULL);
+	vkFreeMemory(vkData->device, vkData->vertices.memory, NULL);
+
+	//for (uint32_t i = 0; i < vkData->swapchainImageCount; ++i)
+		//vkDestroyImageView(vkData->device, vkData->buffers[i].view, NULL);
+
+	vkData->fpDestroySwapchainKHR(vkData->device, vkData->swapchain, NULL);
+	free(vkData->buffers);
+
+	vkDestroyDevice(vkData->device, NULL);
+	vkDestroySurfaceKHR(vkData->instance, vkData->surface, NULL);
+	vkDestroyInstance(vkData->instance, NULL);
+
+	free(vkData->queueProps);
 }
 
 void destroyWindow(Window *window)
