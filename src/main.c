@@ -53,7 +53,7 @@ typedef struct _VulkanData {
 	uint32_t currentBuffer;
 
 	uint32_t enabledExtensionCount;
-	const char* enabledExtensionNames[64];
+	const char* enabledExtensions[64];
 
 	uint32_t width;
 	uint32_t height;
@@ -153,12 +153,12 @@ static bool memoryTypeFromProperties(VulkanData *vkData, uint32_t typeBits, VkFl
 
 static VkShaderModule loadShader(VulkanData *vkData, char *path)
 {
-	FILE *shaderSrc = fopen(path, "r");
-	fseek(shaderSrc, 0, SEEK_END);
-	size_t size = ftell(shaderSrc);
-	rewind(shaderSrc);
-	void *shader = malloc(size);
-	size_t result = fread(shader, 1, size, shaderSrc);
+	FILE *shaderFile = fopen(path, "r");
+	fseek(shaderFile, 0, SEEK_END);
+	size_t size = ftell(shaderFile);
+	rewind(shaderFile);
+	void *shaderSrc = malloc(size);
+	size_t result = fread(shaderSrc, 1, size, shaderFile);
 	if (result != size) ERR_EXIT("Error loading shader into memory.\nExiting...\n");
 
 	VkShaderModuleCreateInfo moduleCreateInfo = {
@@ -166,7 +166,7 @@ static VkShaderModule loadShader(VulkanData *vkData, char *path)
 		.pNext = NULL,
 		.flags = 0,
 		.codeSize = size,
-		.pCode = shader
+		.pCode = shaderSrc
 	};
 
 	VkShaderModule module;
@@ -174,8 +174,8 @@ static VkShaderModule loadShader(VulkanData *vkData, char *path)
 	err = vkCreateShaderModule(vkData->device, &moduleCreateInfo, NULL, &module);
 	if (err) ERR_EXIT("Unable to create shader module.\nExiting...\n");
 
-	fclose(shaderSrc);
-	free(shader);
+	fclose(shaderFile);
+	free(shaderSrc);
 
 	return module;
 }
@@ -560,7 +560,7 @@ void preparePipeline(VulkanData *vkData)
 	VkResult err;
 	VkPipelineCache pipelineCache;
 	err = vkCreatePipelineCache(vkData->device, &pipelineCacheCreateInfo, NULL, &pipelineCache);
-	if (err) ERR_EXIT("Unable to create pipeline cache.\nExiting...\n");
+	if (err) ERR_EXIT("Unable to create pipeline cache for graphics pipeline.\nExiting...\n");
 
 	err = vkCreateGraphicsPipelines(vkData->device, pipelineCache, 1, &pipeline, NULL, &vkData->pipeline);
 	if (err) ERR_EXIT("Unable to create graphics pipeline.\nExiting...\n");
@@ -655,8 +655,10 @@ void initVK(VulkanData *vkData)
 	
 	requiredExtensions = glfwGetRequiredInstanceExtensions(&requiredExtensionCount);
 
-	for (uint32_t i = 0; i < requiredExtensionCount; ++i)
-		vkData->enabledExtensionNames[vkData->enabledExtensionCount++] = requiredExtensions[i];
+	vkData->enabledExtensionCount = requiredExtensionCount;
+	memcpy(vkData->enabledExtensions, requiredExtensions, sizeof(requiredExtensions[0]) * requiredExtensionCount);
+	//for (uint32_t i = 0; i < requiredExtensionCount; ++i)
+	//	vkData->enabledExtensions[i] = requiredExtensions[i];
 
 	//Create Vulkan Instance
 	VkApplicationInfo appInfo = {
@@ -677,7 +679,7 @@ void initVK(VulkanData *vkData)
 		.enabledLayerCount = 0,
 		.ppEnabledLayerNames = NULL,
 		.enabledExtensionCount = vkData->enabledExtensionCount,
-		.ppEnabledExtensionNames = vkData->enabledExtensionNames
+		.ppEnabledExtensionNames = vkData->enabledExtensions
 	};
 
 	//Creating Vulkan Instance
@@ -689,7 +691,9 @@ void initVK(VulkanData *vkData)
 	err = vkEnumeratePhysicalDevices(vkData->instance, &physicalDeviceCount, NULL);
 	if (err) ERR_EXIT("Failed to query the number of physical devices present.\nExiting...\n");
 	if (physicalDeviceCount == 0) ERR_EXIT("No physcial devices were found with Vulkan support.\nExiting...\n");
-	
+
+	printf("Number of physical devices: %u\n", physicalDeviceCount);
+
 	//Selecting the render device
 	VkPhysicalDevice *physicalDevices = malloc(sizeof(VkPhysicalDevice) * physicalDeviceCount);
 	err = vkEnumeratePhysicalDevices(vkData->instance, &physicalDeviceCount, physicalDevices);
@@ -720,7 +724,7 @@ void initVK(VulkanData *vkData)
 			if (!strcmp(VK_KHR_SWAPCHAIN_EXTENSION_NAME, deviceExtensionProps[i].extensionName))
 			{
 				swapchainExtFound = true;
-				vkData->enabledExtensionNames[vkData->enabledExtensionCount++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+				vkData->enabledExtensions[vkData->enabledExtensionCount++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
 			}
 		}
 	}
@@ -766,7 +770,7 @@ void initDevice(VulkanData *vkData)
 		.enabledLayerCount = 0,
 		.ppEnabledLayerNames = NULL,
 		.enabledExtensionCount = vkData->enabledExtensionCount,
-		.ppEnabledExtensionNames = vkData->enabledExtensionNames
+		.ppEnabledExtensionNames = vkData->enabledExtensions
 	};
 
 	err = vkCreateDevice(vkData->physicalDevice, &device, NULL, &vkData->device);
@@ -896,7 +900,7 @@ void destroyVulkan(VulkanData *vkData)
 	vkFreeCommandBuffers(vkData->device, vkData->cmdPool, 1, &vkData->drawCmdBuffer);
 	vkDestroyCommandPool(vkData->device, vkData->cmdPool, NULL);
 
-	//vkDestroyPipeline(vkData->device, vkData->pipeline, NULL);
+	vkDestroyPipeline(vkData->device, vkData->pipeline, NULL);
 	vkDestroyRenderPass(vkData->device, vkData->renderPass, NULL);
 	//vkDestroyPipelineLayout(vkData->device, vkData->pipelineLayout, NULL);
 
