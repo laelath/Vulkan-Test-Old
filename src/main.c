@@ -28,11 +28,11 @@
 	if (vkData->fp##entrypoint == NULL) ERR_EXIT("vkGetDeviceProcAddr failed to find vk" #entrypoint ".\nExiting...\n"); \
 }
 
-typedef struct _SwapchainBuffer {
-	VkImage image;
-	VkCommandBuffer cmdBuffer;
-	VkImageView imageView;
-} SwapchainBuffer;
+typedef struct _SwapchainBuffers {
+	VkImage *images;
+	VkCommandBuffer *cmdBuffers;
+	VkImageView *imageViews;
+} SwapchainBuffers;
 
 typedef struct _VulkanData {
 	VkInstance instance;
@@ -59,13 +59,21 @@ typedef struct _VulkanData {
 	uint32_t height;
 
 	VkCommandPool cmdPool;
-	VkCommandBuffer drawCmdBuffer;
 	VkCommandBuffer setupCmdBuffer;
-	SwapchainBuffer *buffers;
+	VkCommandBuffer postPresentCmdBuffer;
+	VkCommandBuffer prePresentCmdBuffer;
+
+	VkFramebuffer *framebuffers;
+	SwapchainBuffers buffers;
 
 	VkRenderPass renderPass;
 	VkPipeline pipeline;
-	VkPipelineLayout pipelineLayout;
+	//VkPipelineLayout pipelineLayout;
+	
+	struct {
+		VkSemaphore presentComplete;
+		VkSemaphore renderComplete;
+	} semaphores;
 
 	struct {
 		VkBuffer buffer;
@@ -74,6 +82,12 @@ typedef struct _VulkanData {
 		VkVertexInputBindingDescription vertexInputBindings[1];
 		VkVertexInputAttributeDescription vertexInputAttributes[2];
 	} vertices;
+
+	struct {
+		uint32_t count;
+		VkBuffer buffer;
+		VkDeviceMemory memory;
+	} indices;
 
 	PFN_vkGetPhysicalDeviceSurfaceSupportKHR fpGetPhysicalDeviceSurfaceSupportKHR;
 	PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR fpGetPhysicalDeviceSurfaceCapabilitiesKHR;
@@ -90,18 +104,6 @@ typedef struct _Window {
 	GLFWwindow* glfwWindow;
 	VulkanData vkData;
 } Window;
-
-void glfw_error_callback(int error, const char* description)
-{
-	printf("GLFW error code: %i\n%s\n", error, description);
-	fflush(stdout);
-}
-
-void glfw_key_callback(GLFWwindow *window, int key, int scancode, int action, int mods)
-{
-	if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
-		glfwSetWindowShouldClose(window, GLFW_TRUE);
-}
 
 static void setImageLayout(VulkanData *vkData, VkImage image, VkImageAspectFlags aspectMask, VkImageLayout oldImageLayout, VkImageLayout newImageLayout)
 {
@@ -180,7 +182,60 @@ static VkShaderModule loadShader(VulkanData *vkData, char *path)
 	return module;
 }
 
-void prepareBuffers(VulkanData *vkData)
+void setupCommandPool(VulkanData *vkData)
+{
+	VkResult err;
+
+	VkCommandPoolCreateInfo cmdPoolCreateInfo = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+		.pNext = NULL,
+		.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+		.queueFamilyIndex = vkData->graphicsQueueNodeIndex
+	};
+
+	err = vkCreateCommandPool(vkData->device, &cmdPoolCreateInfo, NULL, &vkData->cmdPool);
+	if (err) ERR_EXIT("Failed to create command pool.\nExiting...\n");
+}
+
+void initSetupCommandBuffer(VulkanData *vkData)
+{
+	VkResult err;
+
+	VkCommandBufferAllocateInfo cmdInfo = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+		.pNext = NULL,
+		.commandPool = vkData->cmdPool,
+		.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+		.commandBufferCount = 1
+	};
+
+	err = vkAllocateCommandBuffers(vkData->device, &cmdInfo, &vkData->setupCmdBuffer);
+	if (err) ERR_EXIT("Failed to allocate command buffers.\nExiting...\n");
+
+	//Start setup command buffer
+	VkCommandBufferInheritanceInfo cmdInheritInfo = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO,
+		.pNext = NULL,
+		.renderPass = VK_NULL_HANDLE,
+		.subpass = 0,
+		.framebuffer = VK_NULL_HANDLE,
+		.occlusionQueryEnable = VK_FALSE,
+		.queryFlags = 0,
+		.pipelineStatistics = 0
+	};
+
+	VkCommandBufferBeginInfo cmdBeginInfo = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.pInheritanceInfo = &cmdInheritInfo
+	};
+
+	err = vkBeginCommandBuffer(vkData->setupCmdBuffer, &cmdBeginInfo);
+	if (err) ERR_EXIT("Failed to start setup command buffer.\nExiting...\n");
+}
+
+void setupSwapchain(VulkanData *vkData)
 {
 	VkResult err;
 
@@ -202,6 +257,8 @@ void prepareBuffers(VulkanData *vkData)
 		vkData->width = surfaceCapabilities.currentExtent.width;
 		vkData->height = surfaceCapabilities.currentExtent.height;
 	}
+
+	printf("Creating surface, width: %u heiht: %u\n", vkData->width, vkData->height);
 
 	/*uint32_t presentModeCount;
 	err = vkData->fpGetPhysicalDeviceSurfacePresentModesKHR(vkData->physicalDevice, vkData->surface, &presentModeCount, NULL);
@@ -259,18 +316,23 @@ void prepareBuffers(VulkanData *vkData)
 	err = vkData->fpGetSwapchainImagesKHR(vkData->device, vkData->swapchain, &vkData->swapchainImageCount, swapchainImages);
 	if (err) ERR_EXIT("Faild to get swapchain images.\nExiting...\n");
 
-	vkData->buffers = malloc(vkData->swapchainImageCount * sizeof(SwapchainBuffer));
+	//vkData->buffers = malloc(vkData->swapchainImageCount * sizeof(SwapchainBuffer));
+	vkData->buffers.images = malloc(vkData->swapchainImageCount * sizeof(VkImage));
+	vkData->buffers.cmdBuffers = malloc(vkData->swapchainImageCount * sizeof(VkCommandBuffer));
+	vkData->buffers.imageViews = malloc(vkData->swapchainImageCount * sizeof(VkImageView));
 
 	for (uint32_t i = 0; i < vkData->swapchainImageCount; ++i)
 	{
-		vkData->buffers[i].image = swapchainImages[i];
-		setImageLayout(vkData, vkData->buffers[i].image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+		//vkData->buffers[i].image = swapchainImages[i];
+		//setImageLayout(vkData, vkData->buffers[i].image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+		vkData->buffers.images[i] = swapchainImages[i];
+		setImageLayout(vkData, vkData->buffers.images[i], VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
 		VkImageViewCreateInfo colorAttachmentView = {
 			.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
 			.pNext = NULL,
 			.flags = 0,
-			.image = vkData->buffers[i].image,
+			.image = vkData->buffers.images[i],
 			.viewType = VK_IMAGE_VIEW_TYPE_2D,
 			.format = vkData->format,
 			.components = {
@@ -286,7 +348,7 @@ void prepareBuffers(VulkanData *vkData)
 				.layerCount = 1 }
 		};
 
-		err = vkCreateImageView(vkData->device, &colorAttachmentView, NULL, &vkData->buffers[i].imageView);
+		err = vkCreateImageView(vkData->device, &colorAttachmentView, NULL, &vkData->buffers.imageViews[i]);
 		if (err) ERR_EXIT("Unable to create image view for swapchain image.\nExiting...\n");
 	}
 
@@ -294,17 +356,64 @@ void prepareBuffers(VulkanData *vkData)
 	free(swapchainImages);
 }
 
+void createCommandBuffers(VulkanData *vkData)
+{
+	VkCommandBufferAllocateInfo cmdBuffersInfo = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+		.pNext = NULL,
+		.commandPool = vkData->cmdPool,
+		.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+		.commandBufferCount = vkData->swapchainImageCount
+	};
+
+	VkResult err;
+
+	err = vkAllocateCommandBuffers(vkData->device, &cmdBuffersInfo, vkData->buffers.cmdBuffers);
+	if (err) ERR_EXIT("Unable to create swapchain image command buffers.\nExiting...\n");
+
+	cmdBuffersInfo.commandBufferCount = 1;
+
+	err = vkAllocateCommandBuffers(vkData->device, &cmdBuffersInfo, &vkData->postPresentCmdBuffer);
+	if (err) ERR_EXIT("Unable to create post present command buffer.\nExiting...\n");
+
+	err = vkAllocateCommandBuffers(vkData->device, &cmdBuffersInfo, &vkData->prePresentCmdBuffer);
+	if (err) ERR_EXIT("Unable to create pre present command buffer.\nExiting...\n");
+}
+
+void prepareSemaphores(VulkanData *vkData)
+{
+	VkSemaphoreCreateInfo semaphoreInfo = {
+		.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0
+	};
+
+	VkResult err;
+
+	err = vkCreateSemaphore(vkData->device, &semaphoreInfo, NULL, &vkData->semaphores.presentComplete);
+	if (err) ERR_EXIT("Unable to create presentation completion semaphore.\nExiting...\n");
+
+	err = vkCreateSemaphore(vkData->device, &semaphoreInfo, NULL, &vkData->semaphores.renderComplete);
+	if (err) ERR_EXIT("Unable to create render completion semaphore.\nExiting...\n");
+}
+
 void prepareVertices(VulkanData *vkData)
 {
 	VkResult err;
 
 	const float vertices[18] = {
-		0.0f, 1.0f, 1.0f, 	1.0f, 0.0f, 0.0f,
-		0.75f, -1.0f, 1.0f, 	0.0f, 1.0f, 0.0f,
-		-0.75f, -1.0f, 1.0f, 	0.0f, 0.0f, 1.0f
+		0.0f, -1.0f, 1.0f, 	1.0f, 0.0f, 0.0f,
+		0.75f, 1.0f, 1.0f, 	0.0f, 1.0f, 0.0f,
+		-0.75f, 1.0f, 1.0f, 	0.0f, 0.0f, 1.0f
 	};
 
-	VkBufferCreateInfo bufferInfo = {
+	const uint32_t indices[3] = {
+		0, 1, 2
+	};
+
+	vkData->indices.count = 3;
+
+	VkBufferCreateInfo vertexBufferInfo = {
 		.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
 		.pNext = NULL,
 		.flags = 0,
@@ -315,21 +424,20 @@ void prepareVertices(VulkanData *vkData)
 		.pQueueFamilyIndices = NULL
 	};
 
-	err = vkCreateBuffer(vkData->device, &bufferInfo, NULL, &vkData->vertices.buffer);
+	err = vkCreateBuffer(vkData->device, &vertexBufferInfo, NULL, &vkData->vertices.buffer);
 	if (err) ERR_EXIT("Unable to create vertex buffer.\nExiting...\n");
 
-	VkMemoryRequirements memoryRequirements;
-	vkGetBufferMemoryRequirements(vkData->device, vkData->vertices.buffer, &memoryRequirements);
+	VkMemoryRequirements memReqs;
+	vkGetBufferMemoryRequirements(vkData->device, vkData->vertices.buffer, &memReqs);
 
 	uint32_t memoryType;
-	if (!memoryTypeFromProperties(vkData, memoryRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, &memoryType))
+	if (!memoryTypeFromProperties(vkData, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, &memoryType))
 		ERR_EXIT("Unable to find suitable memory type for vertex buffer.\nExiting...\n");
-
 
 	VkMemoryAllocateInfo memAllocInfo = {
 		.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
 		.pNext = NULL,
-		.allocationSize = memoryRequirements.size,
+		.allocationSize = memReqs.size,
 		.memoryTypeIndex = memoryType
 	};
 
@@ -346,6 +454,41 @@ void prepareVertices(VulkanData *vkData)
 	
 	err = vkBindBufferMemory(vkData->device, vkData->vertices.buffer, vkData->vertices.memory, 0);
 	if (err) ERR_EXIT("Unable to bind mapped vertex memory to buffer.\nExiting...\n");
+
+	VkBufferCreateInfo indexBufferInfo = {
+		.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.size = sizeof(indices),
+		.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+		.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+		.queueFamilyIndexCount = 0,
+		.pQueueFamilyIndices = NULL
+	};
+
+	err = vkCreateBuffer(vkData->device, &indexBufferInfo, NULL, &vkData->indices.buffer);
+	if (err) ERR_EXIT("Unable to create buffer for index data.\nExiting...\n");
+
+	vkGetBufferMemoryRequirements(vkData->device, vkData->indices.buffer, &memReqs);
+
+	if(!memoryTypeFromProperties(vkData, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, &memoryType))
+		ERR_EXIT("Unable t0 find suitable memory type for index buffer.\nExiting...\n");
+
+	memAllocInfo.allocationSize = memReqs.size;
+	memAllocInfo.memoryTypeIndex = memoryType;
+
+	err = vkAllocateMemory(vkData->device, &memAllocInfo, NULL, &vkData->indices.memory);
+	if (err) ERR_EXIT("Unable to allocate memory for index buffer.\nExiting...");
+
+	err = vkMapMemory(vkData->device, vkData->indices.memory, 0, memAllocInfo.allocationSize, 0, &data);
+	if (err) ERR_EXIT("Unable to map memory for index buffer.\nExiting...\n");
+
+	memcpy(data, indices, sizeof(indices));
+
+	vkUnmapMemory(vkData->device, vkData->indices.memory);
+
+	err = vkBindBufferMemory(vkData->device, vkData->indices.buffer, vkData->indices.memory, 0);
+	if (err) ERR_EXIT("Unable to bind mapped index memory to buffer.\nExiting...\n");
 
 	vkData->vertices.vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
 	vkData->vertices.vertexInputInfo.pNext = NULL;
@@ -542,7 +685,7 @@ void preparePipeline(VulkanData *vkData)
 		.pDepthStencilState = NULL,
 		.pColorBlendState = &colorBlend,
 		.pDynamicState = &dynamicState,
-		.layout = vkData->pipelineLayout,
+		.layout = NULL, //vkData->pipelineLayout,
 		.renderPass = vkData->renderPass,
 		.subpass = 0,
 		.basePipelineHandle = 0,
@@ -571,78 +714,155 @@ void preparePipeline(VulkanData *vkData)
 	vkDestroyShaderModule(vkData->device, fragmentShader, NULL);
 }
 
-void prepareSwapchain(VulkanData *vkData)
+void prepareFramebuffers(VulkanData *vkData)
 {
+	VkImageView attachments[1];
+
+	VkFramebufferCreateInfo framebufferInfo = {
+		.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.renderPass = vkData->renderPass,
+		.attachmentCount = 1,
+		.pAttachments = attachments,
+		.width = vkData->width,
+		.height = vkData->height,
+		.layers = 1
+	};
+
+	vkData->framebuffers = malloc(vkData->swapchainImageCount * sizeof(VkFramebuffer));
+
 	VkResult err;
-	
-	//Create command pool
-	VkCommandPoolCreateInfo cmdPoolCreateInfo = {
-		.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-		.pNext = NULL,
-		.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-		.queueFamilyIndex = vkData->graphicsQueueNodeIndex
-	};
 
-	err = vkCreateCommandPool(vkData->device, &cmdPoolCreateInfo, NULL, &vkData->cmdPool);
-	if (err) ERR_EXIT("Failed to create command pool.\nExiting...\n");
+	for (uint32_t i = 0; i < vkData->swapchainImageCount; ++i)
+	{
+		attachments[0] = vkData->buffers.imageViews[i];
+		err = vkCreateFramebuffer(vkData->device, &framebufferInfo, NULL, &vkData->framebuffers[i]);
+		if (err) ERR_EXIT("Unable to create swapchain framebuffer.\nExiting...\n");
+	}
+}
 
-	//Create draw command buffer
-	VkCommandBufferAllocateInfo cmdBufferAllocInfo = {
-		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-		.pNext = NULL,
-		.commandPool = vkData->cmdPool,
-		.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-		.commandBufferCount = 1
-	};
-
-	err = vkAllocateCommandBuffers(vkData->device, &cmdBufferAllocInfo, &vkData->drawCmdBuffer);
-	if (err) ERR_EXIT("Failed to allocate draw command buffer.\nExiting...\n");
-
-	//Create setup command buffer
-	VkCommandBufferAllocateInfo cmdInfo = {
-		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-		.pNext = NULL,
-		.commandPool = vkData->cmdPool,
-		.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-		.commandBufferCount = 1
-	};
-
-	err = vkAllocateCommandBuffers(vkData->device, &cmdInfo, &vkData->setupCmdBuffer);
-	if (err) ERR_EXIT("Failed to allocate command buffers.\nExiting...\n");
-
-	//Start setup command buffer
-	VkCommandBufferInheritanceInfo cmdInheritInfo = {
-		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO,
-		.pNext = NULL,
-		.renderPass = VK_NULL_HANDLE,
-		.subpass = 0,
-		.framebuffer = VK_NULL_HANDLE,
-		.occlusionQueryEnable = VK_FALSE,
-		.queryFlags = 0,
-		.pipelineStatistics = 0
-	};
-
-	VkCommandBufferBeginInfo cmdBeginInfo = {
+void buildCommandBuffers(VulkanData *vkData)
+{
+	VkCommandBufferBeginInfo cmdBufferInfo = {
 		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
 		.pNext = NULL,
 		.flags = 0,
-		.pInheritanceInfo = &cmdInheritInfo
+		.pInheritanceInfo = NULL
 	};
 
-	err = vkBeginCommandBuffer(vkData->setupCmdBuffer, &cmdBeginInfo);
-	if (err) ERR_EXIT("Failed to start setup command buffer.\nExiting...\n");
+	VkClearValue clearValues[1] = {
+		[0] = {
+			.color = {
+				.float32[0] = 0.0f,
+				.float32[1] = 0.0f,
+				.float32[2] = 0.0f,
+				.float32[3] = 0.0f },
+			.depthStencil = {
+				.depth = 0.0f,
+				.stencil = 0 }}
+	};
 
-	prepareBuffers(vkData);
+	VkRenderPassBeginInfo renderPassBeginInfo = {
+		.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+		.pNext = NULL,
+		.renderPass = vkData->renderPass,
+		.renderArea = {
+			.offset = {
+				.x = 0,
+				.y = 0 },
+			.extent = {
+				.width = vkData->width,
+				.height = vkData->height }},
+		.clearValueCount = 1,
+		.pClearValues = clearValues
+	};
+
+	for (uint32_t i = 0; i < vkData->swapchainImageCount; ++i)
+	{
+		VkResult err;
+		renderPassBeginInfo.framebuffer = vkData->framebuffers[i];
+
+		err = vkBeginCommandBuffer(vkData->buffers.cmdBuffers[i], &cmdBufferInfo);
+		if (err) ERR_EXIT("Unable to begin swapchain image command buffer.\nExiting...\n");
+
+		vkCmdBeginRenderPass(vkData->buffers.cmdBuffers[i], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+		VkViewport viewport = {
+			.x = 0.0f,
+			.y = 0.0f,
+			.height = vkData->height,
+			.width = vkData->width,
+			.minDepth = 0.0f,
+			.maxDepth = 1.0f
+		};
+
+		vkCmdSetViewport(vkData->buffers.cmdBuffers[i], 0, 1, &viewport);
+
+		VkRect2D scissor = {
+			.offset = {
+				.x = 0,
+				.y = 0 },
+			.extent = {
+				.width = vkData->width,
+				.height = vkData->height }
+		};
+
+		vkCmdSetScissor(vkData->buffers.cmdBuffers[i], 0, 1, &scissor);
+
+		vkCmdBindPipeline(vkData->buffers.cmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, vkData->pipeline);
+
+		VkDeviceSize offsets[1] = { 0 };
+		vkCmdBindVertexBuffers(vkData->buffers.cmdBuffers[i], VERTEX_BUFFER_BIND_ID, 1, &vkData->vertices.buffer, offsets);
+		vkCmdBindIndexBuffer(vkData->buffers.cmdBuffers[i], vkData->indices.buffer, 0, VK_INDEX_TYPE_UINT32);
+		vkCmdDrawIndexed(vkData->buffers.cmdBuffers[i], vkData->indices.count, 1, 0, 0, 1);
+		vkCmdEndRenderPass(vkData->buffers.cmdBuffers[i]);
+		
+		VkImageMemoryBarrier prePresentBarrier = {
+			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+			.pNext = NULL,
+			.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+			.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT,
+			.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+			.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.image = vkData->buffers.images[i],
+			.subresourceRange = {
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.baseMipLevel = 0,
+				.levelCount = 1,
+				.baseArrayLayer = 0,
+				.layerCount = 1 }
+		};
+
+		vkCmdPipelineBarrier(vkData->buffers.cmdBuffers[i], VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, NULL, 0, NULL, 1, &prePresentBarrier);
+
+		err = vkEndCommandBuffer(vkData->buffers.cmdBuffers[i]);
+		if (err) ERR_EXIT("Error ending recording of draw command buffer.\nExiting...\n");
+	}
+}
+
+
+void prepareVK(VulkanData *vkData)
+{
+	setupCommandPool(vkData);
+	initSetupCommandBuffer(vkData);
+
+	setupSwapchain(vkData);
+	createCommandBuffers(vkData);
+	prepareRenderPass(vkData);
+	//createPipelineCache(vkData);
+	prepareFramebuffers(vkData);
 	//prepareDepth(vkData);
+	
+	prepareSemaphores(vkData);
 	prepareVertices(vkData);
 	//prepareDescriptorLayout(vkData);
-	prepareRenderPass(vkData);
 	preparePipeline(vkData);
-
 	//prepareDescriptorPool(vkData);
 	//prepareDescriptorSet(vkData);
-
-	//prepareFramebuffers(vkData);
+	buildCommandBuffers(vkData);
 }
 
 void initVK(VulkanData *vkData)
@@ -856,17 +1076,173 @@ void initSurface(VulkanData *vkData, GLFWwindow *window)
 	vkGetPhysicalDeviceMemoryProperties(vkData->physicalDevice, &vkData->memoryProps);
 }
 
+void destroySwapchain(VulkanData *vkData)
+{
+	for (uint32_t i = 0; i < vkData->swapchainImageCount; ++i)
+		vkDestroyFramebuffer(vkData->device, vkData->framebuffers[i], NULL);
+
+	vkFreeCommandBuffers(vkData->device, vkData->cmdPool, 1, &vkData->setupCmdBuffer);
+	vkFreeCommandBuffers(vkData->device, vkData->cmdPool, 1, &vkData->postPresentCmdBuffer);
+	vkFreeCommandBuffers(vkData->device, vkData->cmdPool, 1, &vkData->prePresentCmdBuffer);
+
+	//vkFreeCommandBuffers(vkData->device, vkData->cmdPool, 1, &vkData->drawCmdBuffer);
+	vkFreeCommandBuffers(vkData->device, vkData->cmdPool, vkData->swapchainImageCount, vkData->buffers.cmdBuffers);
+	vkDestroyCommandPool(vkData->device, vkData->cmdPool, NULL);
+
+	vkDestroyPipeline(vkData->device, vkData->pipeline, NULL);
+	vkDestroyRenderPass(vkData->device, vkData->renderPass, NULL);
+
+	vkDestroyBuffer(vkData->device, vkData->vertices.buffer, NULL);
+	vkFreeMemory(vkData->device, vkData->vertices.memory, NULL);
+
+	vkDestroyBuffer(vkData->device, vkData->indices.buffer, NULL);
+	vkFreeMemory(vkData->device, vkData->indices.memory, NULL);
+	
+	vkDestroySemaphore(vkData->device, vkData->semaphores.presentComplete, NULL);
+	vkDestroySemaphore(vkData->device, vkData->semaphores.renderComplete, NULL);
+
+	for (uint32_t i = 0; i < vkData->swapchainImageCount; ++i)
+		vkDestroyImageView(vkData->device, vkData->buffers.imageViews[i], NULL);
+
+	free(vkData->buffers.images);
+	free(vkData->buffers.cmdBuffers);
+	free(vkData->buffers.imageViews);
+}
+
+void resizeVK(VulkanData *vkData)
+{
+	printf("Resizing window.\n");
+	destroySwapchain(vkData);
+	prepareVK(vkData);
+}
+
+void drawVK(VulkanData *vkData)
+{
+	vkData->fpAcquireNextImageKHR(vkData->device, vkData->swapchain, UINT64_MAX, vkData->semaphores.presentComplete, NULL, &vkData->currentBuffer);
+
+	VkImageMemoryBarrier postPresentBarrier = {
+		.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+		.pNext = NULL,
+		.srcAccessMask = 0,
+		.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+		.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+		.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.image = vkData->buffers.images[vkData->currentBuffer],
+		.subresourceRange = {
+			.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+			.baseMipLevel = 0,
+			.levelCount = 1,
+			.baseArrayLayer = 0,
+			.layerCount = 1 }
+	};
+
+	VkCommandBufferBeginInfo cmdBufferInfo = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.pInheritanceInfo = NULL
+	};
+
+	VkResult err;
+
+	err = vkBeginCommandBuffer(vkData->postPresentCmdBuffer, &cmdBufferInfo);
+	if (err) ERR_EXIT("Unable to start post present command buffer.\nExiting...\n");
+
+	vkCmdPipelineBarrier(vkData->postPresentCmdBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0, 0, NULL, 0, NULL, 1, &postPresentBarrier);
+
+	err = vkEndCommandBuffer(vkData->postPresentCmdBuffer);
+	if (err) ERR_EXIT("Unable to end post present command buffer.\nExiting...\n");
+
+	VkSubmitInfo submitInfo = {
+		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+		.pNext = NULL,
+		.waitSemaphoreCount = 0,
+		.pWaitSemaphores = NULL,
+		.pWaitDstStageMask = NULL,
+		.commandBufferCount = 1,
+		.pCommandBuffers = &vkData->postPresentCmdBuffer,
+		.signalSemaphoreCount = 0,
+		.pSignalSemaphores = NULL
+	};
+
+	err = vkQueueSubmit(vkData->queue, 1, &submitInfo, VK_NULL_HANDLE);
+	if (err) ERR_EXIT("Unable to submit post present command buffer to queue.\nExiting...\n");
+
+	err = vkQueueWaitIdle(vkData->queue);
+	if (err) ERR_EXIT("Error while waiting for queue to be idle.\nExiting...\n");
+
+	VkPipelineStageFlags pipelineStages = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+	
+	submitInfo.waitSemaphoreCount = 1;
+	submitInfo.pWaitSemaphores = &vkData->semaphores.presentComplete;
+	submitInfo.pWaitDstStageMask = &pipelineStages;
+	submitInfo.commandBufferCount = 1;
+	submitInfo.pCommandBuffers = &vkData->buffers.cmdBuffers[vkData->currentBuffer];
+	submitInfo.signalSemaphoreCount = 1;
+	submitInfo.pSignalSemaphores = &vkData->semaphores.renderComplete;
+
+	err = vkQueueSubmit(vkData->queue, 1, &submitInfo, VK_NULL_HANDLE);
+	if (err) ERR_EXIT("Unable to submit draw command buffer to queue.\nExiting...\n");
+
+	VkPresentInfoKHR presentInfo = {
+		.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+		.pNext = NULL,
+		.waitSemaphoreCount = 1,
+		.pWaitSemaphores = &vkData->semaphores.renderComplete,
+		.swapchainCount = 1,
+		.pSwapchains = &vkData->swapchain,
+		.pImageIndices = &vkData->currentBuffer,
+		.pResults = NULL
+	};
+
+	err = vkData->fpQueuePresentKHR(vkData->queue, &presentInfo);
+	if (err) ERR_EXIT("Unable to present swapchain image.\nExiting...\n");
+}
+
+void runWindow(Window *window)
+{
+	while (!glfwWindowShouldClose(window->glfwWindow))
+	{
+		glfwPollEvents();
+
+		drawVK(&window->vkData);
+
+		vkDeviceWaitIdle(window->vkData.device);
+	}
+}
+
+void error_callback(int error, const char* description)
+{
+	printf("GLFW error code: %i\n%s\n", error, description);
+	fflush(stdout);
+}
+
+void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods)
+{
+	if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
+		glfwSetWindowShouldClose(window, GLFW_TRUE);
+}
+
+void resize_callback(GLFWwindow *window, int width, int height)
+{
+	VulkanData *vkData = glfwGetWindowUserPointer(window);
+	vkData->width = width;
+	vkData->height = height;
+	printf("Resize callback called.\n");
+	resizeVK(vkData);
+}
+
 void initWindow(Window *window)
 {
 	memset(window, 0, sizeof(Window));
 
-	glfwSetErrorCallback(glfw_error_callback);
+	glfwSetErrorCallback(error_callback);
 
 	if(!glfwInit()) ERR_EXIT("Cannot initialize GLFW.\nExiting...\n");
 	if(!glfwVulkanSupported()) ERR_EXIT("GLFW failed to find the Vulkan loader, do you have the most recent driver?\nExiting...\n");
 
-	//window->width = 300;
-	//window->height = 300;
 	window->vkData.width = 300;
 	window->vkData.height = 300;
 
@@ -876,28 +1252,29 @@ void initWindow(Window *window)
 	window->glfwWindow = glfwCreateWindow(window->vkData.width, window->vkData.height, "Vulkan Test Program", NULL, NULL);
 	if (!window->glfwWindow) ERR_EXIT("Failed to create GLFW window.\nExiting...\n");
 
-	glfwSetWindowUserPointer(window->glfwWindow, window);
+	glfwSetWindowUserPointer(window->glfwWindow, &window->vkData);
 	//glfwSetWindowRefreshCallback(window->glfwWindow, );
-	//glfwSetFramebufferSizeCallback(window->glfwWindow, );
-	glfwSetKeyCallback(window->glfwWindow, glfw_key_callback);
+	glfwSetFramebufferSizeCallback(window->glfwWindow, resize_callback);
+	glfwSetKeyCallback(window->glfwWindow, key_callback);
 	
 	initSurface(&window->vkData, window->glfwWindow);
 
-	prepareSwapchain(&window->vkData);
+	prepareVK(&window->vkData);
 }
 
 void destroyVulkan(VulkanData *vkData)
 {
-	//for (uint32_t i = 0; i < vkData->swapchainImageCount; ++i)
-	//	vkDestroyFramebuffer(vkData->device, vkData->framebuffers[i], NULL);
-	//free(vkData->framebuffers);
+	/*for (uint32_t i = 0; i < vkData->swapchainImageCount; ++i)
+		vkDestroyFramebuffer(vkData->device, vkData->framebuffers[i], NULL);
+	free(vkData->framebuffers);
 
 	//vkDestroyDescriptorPool(vkData->device, vkData->descPool, NULL);
 
 	//if (vkData->setupCmdBuffer)
 		vkFreeCommandBuffers(vkData->device, vkData->cmdPool, 1, &vkData->setupCmdBuffer);
 
-	vkFreeCommandBuffers(vkData->device, vkData->cmdPool, 1, &vkData->drawCmdBuffer);
+	//vkFreeCommandBuffers(vkData->device, vkData->cmdPool, 1, &vkData->drawCmdBuffer);
+	vkFreeCommandBuffers(vkData->device, vkData->cmdPool, vkData->swapchainImageCount, vkData->buffers.cmdBuffers);
 	vkDestroyCommandPool(vkData->device, vkData->cmdPool, NULL);
 
 	vkDestroyPipeline(vkData->device, vkData->pipeline, NULL);
@@ -908,10 +1285,14 @@ void destroyVulkan(VulkanData *vkData)
 	vkFreeMemory(vkData->device, vkData->vertices.memory, NULL);
 
 	for (uint32_t i = 0; i < vkData->swapchainImageCount; ++i)
-		vkDestroyImageView(vkData->device, vkData->buffers[i].imageView, NULL);
+		vkDestroyImageView(vkData->device, vkData->buffers.imageViews[i], NULL);
 
 	vkData->fpDestroySwapchainKHR(vkData->device, vkData->swapchain, NULL);
-	free(vkData->buffers);
+	free(vkData->buffers.images);
+	free(vkData->buffers.cmdBuffers);
+	free(vkData->buffers.imageViews);*/
+
+	destroySwapchain(vkData);
 
 	vkDestroyDevice(vkData->device, NULL);
 	vkDestroySurfaceKHR(vkData->instance, vkData->surface, NULL);
@@ -932,7 +1313,11 @@ int main()
 	Window window;
 	initWindow(&window);
 
-	printf("Setup complete, destroying Vulkan structures.\n");
+	printf("Setup complete, starting main loop.\n");
+
+	runWindow(&window);
+
+	printf("Loop exited normally, cleaning up Vulkan structures.\n");
 
 	destroyWindow(&window);
 	return 0;
