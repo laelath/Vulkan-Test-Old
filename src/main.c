@@ -155,7 +155,7 @@ static bool memoryTypeFromProperties(VulkanData *vkData, uint32_t typeBits, VkFl
 
 static VkShaderModule loadShader(VulkanData *vkData, char *path)
 {
-	FILE *shaderFile = fopen(path, "r");
+	FILE *shaderFile = fopen(path, "rb");
 	fseek(shaderFile, 0, SEEK_END);
 	size_t size = ftell(shaderFile);
 	rewind(shaderFile);
@@ -403,8 +403,8 @@ void prepareVertices(VulkanData *vkData)
 
 	const float vertices[18] = {
 		0.0f, -1.0f, 1.0f, 	1.0f, 0.0f, 0.0f,
-		0.75f, 1.0f, 1.0f, 	0.0f, 1.0f, 0.0f,
-		-0.75f, 1.0f, 1.0f, 	0.0f, 0.0f, 1.0f
+		1.0f, 1.0f, 1.0f, 	0.0f, 1.0f, 0.0f,
+		-1.0f, 1.0f, 1.0f, 	0.0f, 0.0f, 1.0f
 	};
 
 	const uint32_t indices[3] = {
