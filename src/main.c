@@ -62,8 +62,6 @@ typedef struct _VulkanData {
 
 	VkCommandPool cmdPool;
 	VkCommandBuffer setupCmdBuffer;
-	VkCommandBuffer postPresentCmdBuffer;
-	VkCommandBuffer prePresentCmdBuffer;
 
 	VkFramebuffer *framebuffers;
 	SwapchainBuffers buffers;
@@ -159,22 +157,11 @@ void initSetupCommandBuffer(VulkanData *vkData)
 	VK_CHECK(vkAllocateCommandBuffers(vkData->device, &cmdInfo, &vkData->setupCmdBuffer));
 
 	//Start setup command buffer
-	VkCommandBufferInheritanceInfo cmdInheritInfo = {
-		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO,
-		.pNext = NULL,
-		.renderPass = VK_NULL_HANDLE,
-		.subpass = 0,
-		.framebuffer = VK_NULL_HANDLE,
-		.occlusionQueryEnable = VK_FALSE,
-		.queryFlags = 0,
-		.pipelineStatistics = 0
-	};
-
 	VkCommandBufferBeginInfo cmdBeginInfo = {
 		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
 		.pNext = NULL,
 		.flags = 0,
-		.pInheritanceInfo = &cmdInheritInfo
+		.pInheritanceInfo = NULL
 	};
 
 	VK_CHECK(vkBeginCommandBuffer(vkData->setupCmdBuffer, &cmdBeginInfo));
@@ -273,15 +260,12 @@ void setupSwapchain(VulkanData *vkData)
 	VkImage *swapchainImages = malloc(vkData->swapchainImageCount * sizeof(VkImage));
 	VK_CHECK(vkData->fpGetSwapchainImagesKHR(vkData->device, vkData->swapchain, &vkData->swapchainImageCount, swapchainImages));
 
-	//vkData->buffers = malloc(vkData->swapchainImageCount * sizeof(SwapchainBuffer));
 	vkData->buffers.images = malloc(vkData->swapchainImageCount * sizeof(VkImage));
 	vkData->buffers.cmdBuffers = malloc(vkData->swapchainImageCount * sizeof(VkCommandBuffer));
 	vkData->buffers.imageViews = malloc(vkData->swapchainImageCount * sizeof(VkImageView));
 
 	for (uint32_t i = 0; i < vkData->swapchainImageCount; ++i)
 	{
-		//vkData->buffers[i].image = swapchainImages[i];
-		//setImageLayout(vkData, vkData->buffers[i].image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 		vkData->buffers.images[i] = swapchainImages[i];
 		setImageLayout(vkData->setupCmdBuffer, vkData->buffers.images[i], VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
@@ -323,11 +307,6 @@ void createCommandBuffers(VulkanData *vkData)
 	};
 
 	VK_CHECK(vkAllocateCommandBuffers(vkData->device, &cmdBuffersInfo, vkData->buffers.cmdBuffers));
-
-	cmdBuffersInfo.commandBufferCount = 1;
-
-	VK_CHECK(vkAllocateCommandBuffers(vkData->device, &cmdBuffersInfo, &vkData->postPresentCmdBuffer));
-	VK_CHECK(vkAllocateCommandBuffers(vkData->device, &cmdBuffersInfo, &vkData->prePresentCmdBuffer));
 }
 
 void prepareSemaphores(VulkanData *vkData)
@@ -426,8 +405,6 @@ void prepareVertices(VulkanData *vkData)
 	memAllocInfo.allocationSize = memReqs.size;
 	if (!getMemoryTypeIndex(vkData->memoryProps, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, &memAllocInfo.memoryTypeIndex))
 		ERR_EXIT("Unable to find suitable memory type for index staging buffer.\nExiting...\n");
-
-	printf("%u\n", memAllocInfo.memoryTypeIndex);
 
 	VK_CHECK(vkAllocateMemory(vkData->device, &memAllocInfo, NULL, &stagingBuffers.indices.memory));
 	VK_CHECK(vkMapMemory(vkData->device, stagingBuffers.indices.memory, 0, memAllocInfo.allocationSize, 0, &data));
@@ -569,8 +546,10 @@ void prepareRenderPass(VulkanData *vkData)
 			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
 			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-			.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-			.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+			.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
+			//.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+			//.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
 		}
 	};
 
@@ -579,18 +558,33 @@ void prepareRenderPass(VulkanData *vkData)
 		.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
 	};
 
-	VkSubpassDescription subpass = {
-		.flags = 0,
-		.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
-		.inputAttachmentCount = 0,
-		.pInputAttachments = NULL,
-		.colorAttachmentCount = 1,
-		.pColorAttachments = &colorReference,
-		.pResolveAttachments = NULL,
-		.pDepthStencilAttachment = NULL,
-		.preserveAttachmentCount = 0,
-		.pPreserveAttachments = NULL
+	VkSubpassDescription subpasses[1] = {
+		[0] = {
+			.flags = 0,
+			.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
+			.inputAttachmentCount = 0,
+			.pInputAttachments = NULL,
+			.colorAttachmentCount = 1,
+			.pColorAttachments = &colorReference,
+			.pResolveAttachments = NULL,
+			.pDepthStencilAttachment = NULL,
+			.preserveAttachmentCount = 0,
+			.pPreserveAttachments = NULL
+		}
 	};
+
+	VkSubpassDependency dependencies[1] = {
+		[0] = {
+			.srcSubpass = VK_SUBPASS_EXTERNAL,
+			.dstSubpass = 0,
+			.srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+			.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			.srcAccessMask = 0,
+			.dstAccessMask = 0,
+			.dependencyFlags = 0
+		}
+	};
+
 
 	VkRenderPassCreateInfo renderPassInfo = {
 		.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
@@ -599,7 +593,7 @@ void prepareRenderPass(VulkanData *vkData)
 		.attachmentCount = 1,
 		.pAttachments = attachments,
 		.subpassCount = 1,
-		.pSubpasses = &subpass,
+		.pSubpasses = subpasses,
 		.dependencyCount = 0,
 		.pDependencies = NULL
 	};
@@ -853,26 +847,6 @@ void buildCommandBuffers(VulkanData *vkData)
 		vkCmdDrawIndexed(vkData->buffers.cmdBuffers[i], vkData->indices.count, 1, 0, 0, 1);
 		vkCmdEndRenderPass(vkData->buffers.cmdBuffers[i]);
 		
-		VkImageMemoryBarrier prePresentBarrier = {
-			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-			.pNext = NULL,
-			.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-			.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT,
-			.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-			.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.image = vkData->buffers.images[i],
-			.subresourceRange = {
-				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-				.baseMipLevel = 0,
-				.levelCount = 1,
-				.baseArrayLayer = 0,
-				.layerCount = 1 }
-		};
-
-		vkCmdPipelineBarrier(vkData->buffers.cmdBuffers[i], VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, NULL, 0, NULL, 1, &prePresentBarrier);
-
 		VK_CHECK(vkEndCommandBuffer(vkData->buffers.cmdBuffers[i]));
 	}
 }
@@ -1105,8 +1079,6 @@ void destroySwapchain(VulkanData *vkData)
 
 	if (vkData->setupCmdBuffer != VK_NULL_HANDLE)
 		vkFreeCommandBuffers(vkData->device, vkData->cmdPool, 1, &vkData->setupCmdBuffer);
-	vkFreeCommandBuffers(vkData->device, vkData->cmdPool, 1, &vkData->postPresentCmdBuffer);
-	vkFreeCommandBuffers(vkData->device, vkData->cmdPool, 1, &vkData->prePresentCmdBuffer);
 
 	vkFreeCommandBuffers(vkData->device, vkData->cmdPool, vkData->swapchainImageCount, vkData->buffers.cmdBuffers);
 	vkDestroyCommandPool(vkData->device, vkData->cmdPool, NULL);
@@ -1142,62 +1114,19 @@ void drawVK(VulkanData *vkData)
 {
 	vkData->fpAcquireNextImageKHR(vkData->device, vkData->swapchain, UINT64_MAX, vkData->semaphores.presentComplete, NULL, &vkData->currentBuffer);
 
-	VkImageMemoryBarrier postPresentBarrier = {
-		.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-		.pNext = NULL,
-		.srcAccessMask = 0,
-		.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-		.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-		.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = vkData->buffers.images[vkData->currentBuffer],
-		.subresourceRange = {
-			.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-			.baseMipLevel = 0,
-			.levelCount = 1,
-			.baseArrayLayer = 0,
-			.layerCount = 1 }
-	};
-
-	VkCommandBufferBeginInfo cmdBufferInfo = {
-		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-		.pNext = NULL,
-		.flags = 0,
-		.pInheritanceInfo = NULL
-	};
-
-	VK_CHECK(vkBeginCommandBuffer(vkData->postPresentCmdBuffer, &cmdBufferInfo));
-
-	vkCmdPipelineBarrier(vkData->postPresentCmdBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0, 0, NULL, 0, NULL, 1, &postPresentBarrier);
-
-	VK_CHECK(vkEndCommandBuffer(vkData->postPresentCmdBuffer));
-
+	VkPipelineStageFlags pipelineStages = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+	
 	VkSubmitInfo submitInfo = {
 		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
 		.pNext = NULL,
-		.waitSemaphoreCount = 0,
-		.pWaitSemaphores = NULL,
-		.pWaitDstStageMask = NULL,
+		.waitSemaphoreCount = 1,
+		.pWaitSemaphores = &vkData->semaphores.presentComplete,
+		.pWaitDstStageMask = &pipelineStages,
 		.commandBufferCount = 1,
-		.pCommandBuffers = &vkData->postPresentCmdBuffer,
-		.signalSemaphoreCount = 0,
-		.pSignalSemaphores = NULL
+		.pCommandBuffers = &vkData->buffers.cmdBuffers[vkData->currentBuffer],
+		.signalSemaphoreCount = 1,
+		.pSignalSemaphores = &vkData->semaphores.renderComplete,
 	};
-
-	VK_CHECK(vkQueueSubmit(vkData->queue, 1, &submitInfo, VK_NULL_HANDLE));
-
-	VK_CHECK(vkQueueWaitIdle(vkData->queue));
-
-	VkPipelineStageFlags pipelineStages = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-	
-	submitInfo.waitSemaphoreCount = 1;
-	submitInfo.pWaitSemaphores = &vkData->semaphores.presentComplete;
-	submitInfo.pWaitDstStageMask = &pipelineStages;
-	submitInfo.commandBufferCount = 1;
-	submitInfo.pCommandBuffers = &vkData->buffers.cmdBuffers[vkData->currentBuffer];
-	submitInfo.signalSemaphoreCount = 1;
-	submitInfo.pSignalSemaphores = &vkData->semaphores.renderComplete;
 
 	VK_CHECK(vkQueueSubmit(vkData->queue, 1, &submitInfo, VK_NULL_HANDLE));
 
