@@ -1,3 +1,5 @@
+#include <stdio.h>
+
 #include "vktools.h"
 
 const char * getVkResultString(VkResult err)
@@ -81,4 +83,55 @@ bool getMemoryTypeIndex(VkPhysicalDeviceMemoryProperties memoryProps, uint32_t t
 		}
 		typeBits >>= 1;
 	}
+}
+
+VkCommandBuffer getCommandBuffer(VkDevice device, VkCommandPool cmdPool, bool begin)
+{
+	VkCommandBufferAllocateInfo cmdBufferAllocInfo = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+		.pNext = NULL,
+		.commandPool = cmdPool,
+		.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+		.commandBufferCount = 1
+	};
+
+	VkCommandBuffer cmdBuffer;
+	VK_CHECK(vkAllocateCommandBuffers(device, &cmdBufferAllocInfo, &cmdBuffer));
+
+	if (begin)
+	{
+		VkCommandBufferBeginInfo cmdBufferInfo = {
+			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+			.pNext = NULL,
+			.flags = 0,
+			.pInheritanceInfo = NULL
+		};
+		VK_CHECK(vkBeginCommandBuffer(cmdBuffer, &cmdBufferInfo));
+	}
+
+	return cmdBuffer;
+}
+
+void flushCommandBuffer(VkDevice device, VkQueue queue, VkCommandPool cmdPool, VkCommandBuffer cmdBuffer)
+{
+	assert(cmdBuffer != NULL);
+
+	VK_CHECK(vkEndCommandBuffer(cmdBuffer));
+
+	VkSubmitInfo submitInfo = {
+		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+		.pNext = NULL,
+		.waitSemaphoreCount = 0,
+		.pWaitSemaphores = NULL,
+		.pWaitDstStageMask = NULL,
+		.commandBufferCount = 1,
+		.pCommandBuffers = &cmdBuffer,
+		.signalSemaphoreCount = 0,
+		.pSignalSemaphores = NULL
+	};
+
+	VK_CHECK(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
+	VK_CHECK(vkQueueWaitIdle(queue));
+
+	vkFreeCommandBuffers(device, cmdPool, 1, &cmdBuffer);
 }

@@ -180,6 +180,26 @@ void initSetupCommandBuffer(VulkanData *vkData)
 	VK_CHECK(vkBeginCommandBuffer(vkData->setupCmdBuffer, &cmdBeginInfo));
 }
 
+void flushSetupCommandBuffer(VulkanData *vkData)
+{
+	if (vkData->setupCmdBuffer == VK_NULL_HANDLE) return;
+
+	VK_CHECK(vkEndCommandBuffer(vkData->setupCmdBuffer));
+
+	VkSubmitInfo submitInfo = {
+		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+		.pNext = NULL,
+		.commandBufferCount = 1,
+		.pCommandBuffers = &vkData->setupCmdBuffer
+	};
+
+	VK_CHECK(vkQueueSubmit(vkData->queue, 1, &submitInfo, NULL));
+	VK_CHECK(vkQueueWaitIdle(vkData->queue));
+
+	vkFreeCommandBuffers(vkData->device, vkData->cmdPool, 1, &vkData->setupCmdBuffer);
+	vkData->setupCmdBuffer = VK_NULL_HANDLE;
+}
+
 void setupSwapchain(VulkanData *vkData)
 {
 	VkSwapchainKHR oldSwapchain = vkData->swapchain;
@@ -364,7 +384,6 @@ void prepareVertices(VulkanData *vkData)
 
 	vertexBufferInfo.size = sizeof(vertices);
 	vertexBufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-
 	VK_CHECK(vkCreateBuffer(vkData->device, &vertexBufferInfo, NULL, &stagingBuffers.vertices.buffer));
 
 	vkGetBufferMemoryRequirements(vkData->device, stagingBuffers.vertices.buffer, &memReqs);
@@ -373,7 +392,6 @@ void prepareVertices(VulkanData *vkData)
 		ERR_EXIT("Unable to find suitable memory type for vertex staging buffer.\nExiting...\n");
 
 	VK_CHECK(vkAllocateMemory(vkData->device, &memAllocInfo, NULL, &stagingBuffers.vertices.memory));
-
 	VK_CHECK(vkMapMemory(vkData->device, stagingBuffers.vertices.memory, 0, memAllocInfo.allocationSize, 0, &data));
 	memcpy(data, vertices, sizeof(vertices));
 	vkUnmapMemory(vkData->device, stagingBuffers.vertices.memory);
@@ -383,14 +401,70 @@ void prepareVertices(VulkanData *vkData)
 	VK_CHECK(vkCreateBuffer(vkData->device, &vertexBufferInfo, NULL, &vkData->vertices.buffer));
 
 	vkGetBufferMemoryRequirements(vkData->device, vkData->vertices.buffer, &memReqs);
-	memAllocInfo.allocationSize - memReqs.size;
+	memAllocInfo.allocationSize = memReqs.size;
 	if (!getMemoryTypeIndex(vkData->memoryProps, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &memAllocInfo.memoryTypeIndex))
 		ERR_EXIT("Unable to find suitable memory type for vertex buffer.\nExiting...\n");
 
 	VK_CHECK(vkAllocateMemory(vkData->device, &memAllocInfo, NULL, &vkData->vertices.memory));
 	VK_CHECK(vkBindBufferMemory(vkData->device, vkData->vertices.buffer, vkData->vertices.memory, 0));
 
+	VkBufferCreateInfo indexBufferInfo = {
+		.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+		.queueFamilyIndexCount = 0,
+		.pQueueFamilyIndices = NULL
+	};
 
+	indexBufferInfo.size = sizeof(indices);
+	indexBufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+
+	VK_CHECK(vkCreateBuffer(vkData->device, &indexBufferInfo, NULL, &stagingBuffers.indices.buffer));
+
+	vkGetBufferMemoryRequirements(vkData->device, stagingBuffers.indices.buffer, &memReqs);
+	memAllocInfo.allocationSize = memReqs.size;
+	if (!getMemoryTypeIndex(vkData->memoryProps, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, &memAllocInfo.memoryTypeIndex))
+		ERR_EXIT("Unable to find suitable memory type for index staging buffer.\nExiting...\n");
+
+	printf("%u\n", memAllocInfo.memoryTypeIndex);
+
+	VK_CHECK(vkAllocateMemory(vkData->device, &memAllocInfo, NULL, &stagingBuffers.indices.memory));
+	VK_CHECK(vkMapMemory(vkData->device, stagingBuffers.indices.memory, 0, memAllocInfo.allocationSize, 0, &data));
+	memcpy(data, indices, sizeof(indices));
+	vkUnmapMemory(vkData->device, stagingBuffers.indices.memory);
+	VK_CHECK(vkBindBufferMemory(vkData->device, stagingBuffers.indices.buffer, stagingBuffers.indices.memory, 0));
+
+	indexBufferInfo.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+	VK_CHECK(vkCreateBuffer(vkData->device, &indexBufferInfo, NULL, &vkData->indices.buffer));
+
+	vkGetBufferMemoryRequirements(vkData->device, vkData->indices.buffer, &memReqs);
+	memAllocInfo.allocationSize = memReqs.size;
+	if (!getMemoryTypeIndex(vkData->memoryProps, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &memAllocInfo.memoryTypeIndex))
+		ERR_EXIT("Unable to find suitable memory type for index buffer.\nExiting...\n");
+
+	VK_CHECK(vkAllocateMemory(vkData->device, &memAllocInfo, NULL, &vkData->indices.memory));
+	VK_CHECK(vkBindBufferMemory(vkData->device, vkData->indices.buffer, vkData->indices.memory, 0));
+
+	VkCommandBuffer copyCmd = getCommandBuffer(vkData->device, vkData->cmdPool, true);
+
+	VkBufferCopy copyRegion = {
+		.srcOffset = 0,
+		.dstOffset = 0
+	};
+
+	copyRegion.size = sizeof(vertices);
+	vkCmdCopyBuffer(copyCmd, stagingBuffers.vertices.buffer, vkData->vertices.buffer, 1, &copyRegion);
+
+	copyRegion.size = sizeof(indices);
+	vkCmdCopyBuffer(copyCmd, stagingBuffers.indices.buffer, vkData->indices.buffer, 1, &copyRegion);
+
+	flushCommandBuffer(vkData->device, vkData->queue, vkData->cmdPool, copyCmd);
+
+	vkDestroyBuffer(vkData->device, stagingBuffers.vertices.buffer, NULL);
+	vkFreeMemory(vkData->device, stagingBuffers.vertices.memory, NULL);
+	vkDestroyBuffer(vkData->device, stagingBuffers.indices.buffer, NULL);
+	vkFreeMemory(vkData->device, stagingBuffers.indices.memory, NULL);
 
 	/*VkBufferCreateInfo vertexBufferInfo = {
 		.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -426,6 +500,7 @@ void prepareVertices(VulkanData *vkData)
 
 	memcpy(data, vertices, sizeof(vertices));
 
+	printf("test 1\n");
 	vkUnmapMemory(vkData->device, vkData->vertices.memory);
 	
 	VK_CHECK(vkBindBufferMemory(vkData->device, vkData->vertices.buffer, vkData->vertices.memory, 0));
@@ -807,13 +882,14 @@ void prepareVK(VulkanData *vkData)
 {
 	setupCommandPool(vkData);
 	initSetupCommandBuffer(vkData);
-
+	
 	setupSwapchain(vkData);
 	createCommandBuffers(vkData);
 	prepareRenderPass(vkData);
 	//createPipelineCache(vkData);
 	prepareFramebuffers(vkData);
 	//prepareDepth(vkData);
+	flushSetupCommandBuffer(vkData);
 	
 	prepareSemaphores(vkData);
 	prepareVertices(vkData);
@@ -1027,11 +1103,11 @@ void destroySwapchain(VulkanData *vkData)
 	for (uint32_t i = 0; i < vkData->swapchainImageCount; ++i)
 		vkDestroyFramebuffer(vkData->device, vkData->framebuffers[i], NULL);
 
-	vkFreeCommandBuffers(vkData->device, vkData->cmdPool, 1, &vkData->setupCmdBuffer);
+	if (vkData->setupCmdBuffer != VK_NULL_HANDLE)
+		vkFreeCommandBuffers(vkData->device, vkData->cmdPool, 1, &vkData->setupCmdBuffer);
 	vkFreeCommandBuffers(vkData->device, vkData->cmdPool, 1, &vkData->postPresentCmdBuffer);
 	vkFreeCommandBuffers(vkData->device, vkData->cmdPool, 1, &vkData->prePresentCmdBuffer);
 
-	//vkFreeCommandBuffers(vkData->device, vkData->cmdPool, 1, &vkData->drawCmdBuffer);
 	vkFreeCommandBuffers(vkData->device, vkData->cmdPool, vkData->swapchainImageCount, vkData->buffers.cmdBuffers);
 	vkDestroyCommandPool(vkData->device, vkData->cmdPool, NULL);
 
@@ -1202,34 +1278,6 @@ void initWindow(Window *window)
 
 void destroyVulkan(VulkanData *vkData)
 {
-	/*for (uint32_t i = 0; i < vkData->swapchainImageCount; ++i)
-		vkDestroyFramebuffer(vkData->device, vkData->framebuffers[i], NULL);
-	free(vkData->framebuffers);
-
-	//vkDestroyDescriptorPool(vkData->device, vkData->descPool, NULL);
-
-	//if (vkData->setupCmdBuffer)
-		vkFreeCommandBuffers(vkData->device, vkData->cmdPool, 1, &vkData->setupCmdBuffer);
-
-	//vkFreeCommandBuffers(vkData->device, vkData->cmdPool, 1, &vkData->drawCmdBuffer);
-	vkFreeCommandBuffers(vkData->device, vkData->cmdPool, vkData->swapchainImageCount, vkData->buffers.cmdBuffers);
-	vkDestroyCommandPool(vkData->device, vkData->cmdPool, NULL);
-
-	vkDestroyPipeline(vkData->device, vkData->pipeline, NULL);
-	vkDestroyRenderPass(vkData->device, vkData->renderPass, NULL);
-	//vkDestroyPipelineLayout(vkData->device, vkData->pipelineLayout, NULL);
-
-	vkDestroyBuffer(vkData->device, vkData->vertices.buffer, NULL);
-	vkFreeMemory(vkData->device, vkData->vertices.memory, NULL);
-
-	for (uint32_t i = 0; i < vkData->swapchainImageCount; ++i)
-		vkDestroyImageView(vkData->device, vkData->buffers.imageViews[i], NULL);
-
-	vkData->fpDestroySwapchainKHR(vkData->device, vkData->swapchain, NULL);
-	free(vkData->buffers.images);
-	free(vkData->buffers.cmdBuffers);
-	free(vkData->buffers.imageViews);*/
-
 	destroySwapchain(vkData);
 
 	vkDestroyDevice(vkData->device, NULL);

@@ -21,4 +21,7 @@ const char * getVkResultString(VkResult err);
 void setImageLayout(VkCommandBuffer cmdBuffer, VkImage image, VkImageAspectFlags aspectMask, VkImageLayout oldLayout, VkImageLayout newLayout);
 bool getMemoryTypeIndex(VkPhysicalDeviceMemoryProperties memProps, uint32_t typeBits, VkFlags requirementsMask, uint32_t *typeIndex);
 
+VkCommandBuffer getCommandBuffer(VkDevice device, VkCommandPool cmdPool, bool begin);
+void flushCommandBuffer(VkDevice device, VkQueue queue, VkCommandPool cmdPool, VkCommandBuffer cmdBuffer);
+
 #endif
