@@ -7,6 +7,8 @@
 #include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
 
+#include "vktools.h"
+
 #define VERTEX_BUFFER_BIND_ID 0
 
 #define ERR_EXIT(err_msg) \
@@ -104,54 +106,6 @@ typedef struct _Window {
 	GLFWwindow* glfwWindow;
 	VulkanData vkData;
 } Window;
-
-static void setImageLayout(VulkanData *vkData, VkImage image, VkImageAspectFlags aspectMask, VkImageLayout oldImageLayout, VkImageLayout newImageLayout)
-{
-	VkResult err;
-
-	VkImageMemoryBarrier imageMemoryBarrier = {
-		.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-		.pNext = NULL,
-		.srcAccessMask = 0,
-		.dstAccessMask = 0,
-		.oldLayout = oldImageLayout,
-		.newLayout = newImageLayout,
-		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = image,
-		.subresourceRange = {aspectMask, 0, 1, 0, 1}
-	};
-
-	if (newImageLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
-		imageMemoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-	if (newImageLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
-		imageMemoryBarrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-	if (newImageLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
-		imageMemoryBarrier.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-	if (newImageLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
-		imageMemoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_INPUT_ATTACHMENT_READ_BIT;
-
-	VkPipelineStageFlags srcStages = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-	VkPipelineStageFlags dstStages = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-
-	vkCmdPipelineBarrier(vkData->setupCmdBuffer, srcStages, dstStages, 0, 0, NULL, 0, NULL, 1, &imageMemoryBarrier);
-}
-
-static bool memoryTypeFromProperties(VulkanData *vkData, uint32_t typeBits, VkFlags requirementsMask, uint32_t *typeIndex)
-{
-	for (uint32_t i = 0; i < 32; i++)
-	{
-		if ((typeBits & 1) == 1)
-		{
-			if ((vkData->memoryProps.memoryTypes[i].propertyFlags & requirementsMask) == requirementsMask)
-			{
-				*typeIndex = i;
-				return true;
-			}
-		}
-		typeBits >>= 1;
-	}
-}
 
 static VkShaderModule loadShader(VulkanData *vkData, char *path)
 {
@@ -326,7 +280,7 @@ void setupSwapchain(VulkanData *vkData)
 		//vkData->buffers[i].image = swapchainImages[i];
 		//setImageLayout(vkData, vkData->buffers[i].image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 		vkData->buffers.images[i] = swapchainImages[i];
-		setImageLayout(vkData, vkData->buffers.images[i], VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+		setImageLayout(vkData->setupCmdBuffer, vkData->buffers.images[i], VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
 		VkImageViewCreateInfo colorAttachmentView = {
 			.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -413,7 +367,66 @@ void prepareVertices(VulkanData *vkData)
 
 	vkData->indices.count = 3;
 
+	void *data;
+	VkMemoryRequirements memReqs;
+	VkMemoryAllocateInfo memAllocInfo = {
+		.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+		.pNext = NULL
+	};
+
+	struct StagingBuffer {
+		VkDeviceMemory memory;
+		VkBuffer buffer;
+	};
+
+	struct {
+		struct StagingBuffer vertices;
+		struct StagingBuffer indices;
+	} stagingBuffers;
+
 	VkBufferCreateInfo vertexBufferInfo = {
+		.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+		.queueFamilyIndexCount = 0,
+		.pQueueFamilyIndices = NULL
+	};
+
+	vertexBufferInfo.size = sizeof(vertices);
+	vertexBufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+
+	err = vkCreateBuffer(vkData->device, &vertexBufferInfo, NULL, &stagingBuffers.vertices.buffer);
+	if (err) ERR_EXIT("Unable to create staging vertex buffer.\nExiting...\n");
+
+	vkGetBufferMemoryRequirements(vkData->device, stagingBuffers.vertices.buffer, &memReqs);
+	memAllocInfo.allocationSize = memReqs.size;
+	if (!getMemoryTypeIndex(vkData->memoryProps, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, &memAllocInfo.memoryTypeIndex))
+		ERR_EXIT("Unable to find suitable memory type for vertex staging buffer.\nExiting...\n");
+
+	err = vkAllocateMemory(vkData->device, &memAllocInfo, NULL, &stagingBuffers.vertices.memory);
+	if (err) ERR_EXIT("Unable to allocate memory for vertex staging buffer.\nExiting...\n");
+
+	err = vkMapMemory(vkData->device, stagingBuffers.vertices.memory, 0, memAllocInfo.allocationSize, 0, &data);
+	if (err) ERR_EXIT("Unable to map memory for vertex staging buffer.\nExiting...\n");
+	memcpy(data, vertices, sizeof(vertices));
+	vkUnmapMemory(vkData->device, stagingBuffers.vertices.memory);
+	err = vkBindBufferMemory(vkData->device, stagingBuffers.vertices.buffer, stagingBuffers.vertices.memory, 0);
+	if (err) ERR_EXIT("Unable to bind vertex staging buffer to memory.\nExiting...\n");
+
+	vertexBufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+	err = vkCreateBuffer(vkData->device, &vertexBufferInfo, NULL, &vkData->vertices.buffer);
+	if (err) ERR_EXIT("Unable to create vertex buffer.\nExiting...\n");
+
+	vkGetBufferMemoryRequirements(vkData->device, vkData->vertices.buffer, &memReqs);
+	memAllocInfo.allocationSize - memReqs.size;
+	if (!getMemoryTypeIndex(vkData->memoryProps, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &memAllocInfo.memoryTypeIndex))
+		ERR_EXIT("Unable to find suitable memory type for vertex buffer.\nExiting...\n");
+
+	VK_CHECK(vkAllocateMemory(vkData->device, &memAllocInfo, NULL, &vkData->vertices.memory));
+	VK_CHECK(vkBindBufferMemory(vkData->device, vkData->vertices.buffer, vkData->vertices.memory, 0));
+
+	/*VkBufferCreateInfo vertexBufferInfo = {
 		.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
 		.pNext = NULL,
 		.flags = 0,
@@ -488,7 +501,7 @@ void prepareVertices(VulkanData *vkData)
 	vkUnmapMemory(vkData->device, vkData->indices.memory);
 
 	err = vkBindBufferMemory(vkData->device, vkData->indices.buffer, vkData->indices.memory, 0);
-	if (err) ERR_EXIT("Unable to bind mapped index memory to buffer.\nExiting...\n");
+	if (err) ERR_EXIT("Unable to bind mapped index memory to buffer.\nExiting...\n");*/
 
 	vkData->vertices.vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
 	vkData->vertices.vertexInputInfo.pNext = NULL;
