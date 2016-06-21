@@ -126,9 +126,7 @@ static VkShaderModule loadShader(VulkanData *vkData, char *path)
 	};
 
 	VkShaderModule module;
-	VkResult err;
-	err = vkCreateShaderModule(vkData->device, &moduleCreateInfo, NULL, &module);
-	if (err) ERR_EXIT("Unable to create shader module.\nExiting...\n");
+	VK_CHECK(vkCreateShaderModule(vkData->device, &moduleCreateInfo, NULL, &module));
 
 	fclose(shaderFile);
 	free(shaderSrc);
@@ -138,8 +136,6 @@ static VkShaderModule loadShader(VulkanData *vkData, char *path)
 
 void setupCommandPool(VulkanData *vkData)
 {
-	VkResult err;
-
 	VkCommandPoolCreateInfo cmdPoolCreateInfo = {
 		.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
 		.pNext = NULL,
@@ -147,14 +143,11 @@ void setupCommandPool(VulkanData *vkData)
 		.queueFamilyIndex = vkData->graphicsQueueNodeIndex
 	};
 
-	err = vkCreateCommandPool(vkData->device, &cmdPoolCreateInfo, NULL, &vkData->cmdPool);
-	if (err) ERR_EXIT("Failed to create command pool.\nExiting...\n");
+	VK_CHECK(vkCreateCommandPool(vkData->device, &cmdPoolCreateInfo, NULL, &vkData->cmdPool));
 }
 
 void initSetupCommandBuffer(VulkanData *vkData)
 {
-	VkResult err;
-
 	VkCommandBufferAllocateInfo cmdInfo = {
 		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
 		.pNext = NULL,
@@ -163,8 +156,7 @@ void initSetupCommandBuffer(VulkanData *vkData)
 		.commandBufferCount = 1
 	};
 
-	err = vkAllocateCommandBuffers(vkData->device, &cmdInfo, &vkData->setupCmdBuffer);
-	if (err) ERR_EXIT("Failed to allocate command buffers.\nExiting...\n");
+	VK_CHECK(vkAllocateCommandBuffers(vkData->device, &cmdInfo, &vkData->setupCmdBuffer));
 
 	//Start setup command buffer
 	VkCommandBufferInheritanceInfo cmdInheritInfo = {
@@ -185,19 +177,15 @@ void initSetupCommandBuffer(VulkanData *vkData)
 		.pInheritanceInfo = &cmdInheritInfo
 	};
 
-	err = vkBeginCommandBuffer(vkData->setupCmdBuffer, &cmdBeginInfo);
-	if (err) ERR_EXIT("Failed to start setup command buffer.\nExiting...\n");
+	VK_CHECK(vkBeginCommandBuffer(vkData->setupCmdBuffer, &cmdBeginInfo));
 }
 
 void setupSwapchain(VulkanData *vkData)
 {
-	VkResult err;
-
 	VkSwapchainKHR oldSwapchain = vkData->swapchain;
 
 	VkSurfaceCapabilitiesKHR surfaceCapabilities;
-	err = vkData->fpGetPhysicalDeviceSurfaceCapabilitiesKHR(vkData->physicalDevice, vkData->surface, &surfaceCapabilities);
-	if (err) ERR_EXIT("Unable to query physical device surface capabilities.\nExiting...\n");
+	VK_CHECK(vkData->fpGetPhysicalDeviceSurfaceCapabilitiesKHR(vkData->physicalDevice, vkData->surface, &surfaceCapabilities));
 
 	VkExtent2D swapchainExtent;
 	if(surfaceCapabilities.currentExtent.width == (uint32_t)-1)
@@ -215,12 +203,10 @@ void setupSwapchain(VulkanData *vkData)
 	printf("Creating surface, width: %u heiht: %u\n", vkData->width, vkData->height);
 
 	/*uint32_t presentModeCount;
-	err = vkData->fpGetPhysicalDeviceSurfacePresentModesKHR(vkData->physicalDevice, vkData->surface, &presentModeCount, NULL);
-	if (err) ERR_EXIT("Unable to query physical device surface present mode count.\nExiting...\n");
+	VK_CHECK(vkData->fpGetPhysicalDeviceSurfacePresentModesKHR(vkData->physicalDevice, vkData->surface, &presentModeCount, NULL));
 
 	VkPresentModeKHR *presentModes = malloc(presentModeCount * sizeof(VkPresentModeKHR));
-	err = vkData->fpGetPhysicalDeviceSurfacePresentModesKHR(vkData->physicalDevice, vkData->surface, &presentModeCount, presentModes);
-	if (err) ERR_EXIT("Unable to query physical device surface present modes.\nExiting...\n");*/
+	VK_CHECK(vkData->fpGetPhysicalDeviceSurfacePresentModesKHR(vkData->physicalDevice, vkData->surface, &presentModeCount, presentModes));*/
 
 	VkPresentModeKHR swapchainPresentMode = VK_PRESENT_MODE_FIFO_KHR;
 
@@ -255,20 +241,17 @@ void setupSwapchain(VulkanData *vkData)
 		.oldSwapchain = oldSwapchain
 	};
 
-	err = vkData->fpCreateSwapchainKHR(vkData->device, &swapchain, NULL, &vkData->swapchain);
-	if (err) ERR_EXIT("Failed to create swapchain.\nExiting...\n");
+	VK_CHECK(vkData->fpCreateSwapchainKHR(vkData->device, &swapchain, NULL, &vkData->swapchain));
 
 	if (oldSwapchain != VK_NULL_HANDLE)
 	{
 		vkData->fpDestroySwapchainKHR(vkData->device, oldSwapchain, NULL);
 	}
 
-	err = vkData->fpGetSwapchainImagesKHR(vkData->device, vkData->swapchain, &vkData->swapchainImageCount, NULL);
-	if (err) ERR_EXIT("Failed to query the number of swapchain images.\nExiting...\n");
+	VK_CHECK(vkData->fpGetSwapchainImagesKHR(vkData->device, vkData->swapchain, &vkData->swapchainImageCount, NULL));
 
 	VkImage *swapchainImages = malloc(vkData->swapchainImageCount * sizeof(VkImage));
-	err = vkData->fpGetSwapchainImagesKHR(vkData->device, vkData->swapchain, &vkData->swapchainImageCount, swapchainImages);
-	if (err) ERR_EXIT("Faild to get swapchain images.\nExiting...\n");
+	VK_CHECK(vkData->fpGetSwapchainImagesKHR(vkData->device, vkData->swapchain, &vkData->swapchainImageCount, swapchainImages));
 
 	//vkData->buffers = malloc(vkData->swapchainImageCount * sizeof(SwapchainBuffer));
 	vkData->buffers.images = malloc(vkData->swapchainImageCount * sizeof(VkImage));
@@ -302,8 +285,7 @@ void setupSwapchain(VulkanData *vkData)
 				.layerCount = 1 }
 		};
 
-		err = vkCreateImageView(vkData->device, &colorAttachmentView, NULL, &vkData->buffers.imageViews[i]);
-		if (err) ERR_EXIT("Unable to create image view for swapchain image.\nExiting...\n");
+		VK_CHECK(vkCreateImageView(vkData->device, &colorAttachmentView, NULL, &vkData->buffers.imageViews[i]));
 	}
 
 	vkData->currentBuffer = 0;
@@ -320,18 +302,12 @@ void createCommandBuffers(VulkanData *vkData)
 		.commandBufferCount = vkData->swapchainImageCount
 	};
 
-	VkResult err;
-
-	err = vkAllocateCommandBuffers(vkData->device, &cmdBuffersInfo, vkData->buffers.cmdBuffers);
-	if (err) ERR_EXIT("Unable to create swapchain image command buffers.\nExiting...\n");
+	VK_CHECK(vkAllocateCommandBuffers(vkData->device, &cmdBuffersInfo, vkData->buffers.cmdBuffers));
 
 	cmdBuffersInfo.commandBufferCount = 1;
 
-	err = vkAllocateCommandBuffers(vkData->device, &cmdBuffersInfo, &vkData->postPresentCmdBuffer);
-	if (err) ERR_EXIT("Unable to create post present command buffer.\nExiting...\n");
-
-	err = vkAllocateCommandBuffers(vkData->device, &cmdBuffersInfo, &vkData->prePresentCmdBuffer);
-	if (err) ERR_EXIT("Unable to create pre present command buffer.\nExiting...\n");
+	VK_CHECK(vkAllocateCommandBuffers(vkData->device, &cmdBuffersInfo, &vkData->postPresentCmdBuffer));
+	VK_CHECK(vkAllocateCommandBuffers(vkData->device, &cmdBuffersInfo, &vkData->prePresentCmdBuffer));
 }
 
 void prepareSemaphores(VulkanData *vkData)
@@ -342,19 +318,12 @@ void prepareSemaphores(VulkanData *vkData)
 		.flags = 0
 	};
 
-	VkResult err;
-
-	err = vkCreateSemaphore(vkData->device, &semaphoreInfo, NULL, &vkData->semaphores.presentComplete);
-	if (err) ERR_EXIT("Unable to create presentation completion semaphore.\nExiting...\n");
-
-	err = vkCreateSemaphore(vkData->device, &semaphoreInfo, NULL, &vkData->semaphores.renderComplete);
-	if (err) ERR_EXIT("Unable to create render completion semaphore.\nExiting...\n");
+	VK_CHECK(vkCreateSemaphore(vkData->device, &semaphoreInfo, NULL, &vkData->semaphores.presentComplete));
+	VK_CHECK(vkCreateSemaphore(vkData->device, &semaphoreInfo, NULL, &vkData->semaphores.renderComplete));
 }
 
 void prepareVertices(VulkanData *vkData)
 {
-	VkResult err;
-
 	const float vertices[18] = {
 		0.0f, -1.0f, 1.0f, 	1.0f, 0.0f, 0.0f,
 		1.0f, 1.0f, 1.0f, 	0.0f, 1.0f, 0.0f,
@@ -396,27 +365,22 @@ void prepareVertices(VulkanData *vkData)
 	vertexBufferInfo.size = sizeof(vertices);
 	vertexBufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
 
-	err = vkCreateBuffer(vkData->device, &vertexBufferInfo, NULL, &stagingBuffers.vertices.buffer);
-	if (err) ERR_EXIT("Unable to create staging vertex buffer.\nExiting...\n");
+	VK_CHECK(vkCreateBuffer(vkData->device, &vertexBufferInfo, NULL, &stagingBuffers.vertices.buffer));
 
 	vkGetBufferMemoryRequirements(vkData->device, stagingBuffers.vertices.buffer, &memReqs);
 	memAllocInfo.allocationSize = memReqs.size;
 	if (!getMemoryTypeIndex(vkData->memoryProps, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, &memAllocInfo.memoryTypeIndex))
 		ERR_EXIT("Unable to find suitable memory type for vertex staging buffer.\nExiting...\n");
 
-	err = vkAllocateMemory(vkData->device, &memAllocInfo, NULL, &stagingBuffers.vertices.memory);
-	if (err) ERR_EXIT("Unable to allocate memory for vertex staging buffer.\nExiting...\n");
+	VK_CHECK(vkAllocateMemory(vkData->device, &memAllocInfo, NULL, &stagingBuffers.vertices.memory));
 
-	err = vkMapMemory(vkData->device, stagingBuffers.vertices.memory, 0, memAllocInfo.allocationSize, 0, &data);
-	if (err) ERR_EXIT("Unable to map memory for vertex staging buffer.\nExiting...\n");
+	VK_CHECK(vkMapMemory(vkData->device, stagingBuffers.vertices.memory, 0, memAllocInfo.allocationSize, 0, &data));
 	memcpy(data, vertices, sizeof(vertices));
 	vkUnmapMemory(vkData->device, stagingBuffers.vertices.memory);
-	err = vkBindBufferMemory(vkData->device, stagingBuffers.vertices.buffer, stagingBuffers.vertices.memory, 0);
-	if (err) ERR_EXIT("Unable to bind vertex staging buffer to memory.\nExiting...\n");
+	VK_CHECK(vkBindBufferMemory(vkData->device, stagingBuffers.vertices.buffer, stagingBuffers.vertices.memory, 0));
 
 	vertexBufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-	err = vkCreateBuffer(vkData->device, &vertexBufferInfo, NULL, &vkData->vertices.buffer);
-	if (err) ERR_EXIT("Unable to create vertex buffer.\nExiting...\n");
+	VK_CHECK(vkCreateBuffer(vkData->device, &vertexBufferInfo, NULL, &vkData->vertices.buffer));
 
 	vkGetBufferMemoryRequirements(vkData->device, vkData->vertices.buffer, &memReqs);
 	memAllocInfo.allocationSize - memReqs.size;
@@ -425,6 +389,8 @@ void prepareVertices(VulkanData *vkData)
 
 	VK_CHECK(vkAllocateMemory(vkData->device, &memAllocInfo, NULL, &vkData->vertices.memory));
 	VK_CHECK(vkBindBufferMemory(vkData->device, vkData->vertices.buffer, vkData->vertices.memory, 0));
+
+
 
 	/*VkBufferCreateInfo vertexBufferInfo = {
 		.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -437,8 +403,7 @@ void prepareVertices(VulkanData *vkData)
 		.pQueueFamilyIndices = NULL
 	};
 
-	err = vkCreateBuffer(vkData->device, &vertexBufferInfo, NULL, &vkData->vertices.buffer);
-	if (err) ERR_EXIT("Unable to create vertex buffer.\nExiting...\n");
+	VK_CHECK(vkCreateBuffer(vkData->device, &vertexBufferInfo, NULL, &vkData->vertices.buffer));
 
 	VkMemoryRequirements memReqs;
 	vkGetBufferMemoryRequirements(vkData->device, vkData->vertices.buffer, &memReqs);
@@ -454,19 +419,16 @@ void prepareVertices(VulkanData *vkData)
 		.memoryTypeIndex = memoryType
 	};
 
-	err = vkAllocateMemory(vkData->device, &memAllocInfo, NULL, &vkData->vertices.memory);
-	if (err) ERR_EXIT("Unable to allocate memory for vertex buffer.\nExiting...\n");
+	VK_CHECK(vkAllocateMemory(vkData->device, &memAllocInfo, NULL, &vkData->vertices.memory));
 
 	void *data;
-	err = vkMapMemory(vkData->device, vkData->vertices.memory, 0, memAllocInfo.allocationSize, 0, &data);
-	if (err) ERR_EXIT("Unable to map memory for vertex buffer.\nExiting...\n");
+	VK_CHECK(vkMapMemory(vkData->device, vkData->vertices.memory, 0, memAllocInfo.allocationSize, 0, &data));
 
 	memcpy(data, vertices, sizeof(vertices));
 
 	vkUnmapMemory(vkData->device, vkData->vertices.memory);
 	
-	err = vkBindBufferMemory(vkData->device, vkData->vertices.buffer, vkData->vertices.memory, 0);
-	if (err) ERR_EXIT("Unable to bind mapped vertex memory to buffer.\nExiting...\n");
+	VK_CHECK(vkBindBufferMemory(vkData->device, vkData->vertices.buffer, vkData->vertices.memory, 0));
 
 	VkBufferCreateInfo indexBufferInfo = {
 		.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -479,8 +441,7 @@ void prepareVertices(VulkanData *vkData)
 		.pQueueFamilyIndices = NULL
 	};
 
-	err = vkCreateBuffer(vkData->device, &indexBufferInfo, NULL, &vkData->indices.buffer);
-	if (err) ERR_EXIT("Unable to create buffer for index data.\nExiting...\n");
+	VK_CHECK(vkCreateBuffer(vkData->device, &indexBufferInfo, NULL, &vkData->indices.buffer));
 
 	vkGetBufferMemoryRequirements(vkData->device, vkData->indices.buffer, &memReqs);
 
@@ -490,18 +451,14 @@ void prepareVertices(VulkanData *vkData)
 	memAllocInfo.allocationSize = memReqs.size;
 	memAllocInfo.memoryTypeIndex = memoryType;
 
-	err = vkAllocateMemory(vkData->device, &memAllocInfo, NULL, &vkData->indices.memory);
-	if (err) ERR_EXIT("Unable to allocate memory for index buffer.\nExiting...");
-
-	err = vkMapMemory(vkData->device, vkData->indices.memory, 0, memAllocInfo.allocationSize, 0, &data);
-	if (err) ERR_EXIT("Unable to map memory for index buffer.\nExiting...\n");
+	VK_CHECK(vkAllocateMemory(vkData->device, &memAllocInfo, NULL, &vkData->indices.memory));
+	VK_CHECK(vkMapMemory(vkData->device, vkData->indices.memory, 0, memAllocInfo.allocationSize, 0, &data));
 
 	memcpy(data, indices, sizeof(indices));
 
 	vkUnmapMemory(vkData->device, vkData->indices.memory);
 
-	err = vkBindBufferMemory(vkData->device, vkData->indices.buffer, vkData->indices.memory, 0);
-	if (err) ERR_EXIT("Unable to bind mapped index memory to buffer.\nExiting...\n");*/
+	VK_CHECK(vkBindBufferMemory(vkData->device, vkData->indices.buffer, vkData->indices.memory, 0));*/
 
 	vkData->vertices.vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
 	vkData->vertices.vertexInputInfo.pNext = NULL;
@@ -572,9 +529,7 @@ void prepareRenderPass(VulkanData *vkData)
 		.pDependencies = NULL
 	};
 
-	VkResult err;
-	err = vkCreateRenderPass(vkData->device, &renderPassInfo, NULL, &vkData->renderPass);
-	if (err) ERR_EXIT("Unable to create render pass.\nExiting...\n");
+	VK_CHECK(vkCreateRenderPass(vkData->device, &renderPassInfo, NULL, &vkData->renderPass));
 }
 
 void preparePipeline(VulkanData *vkData)
@@ -713,13 +668,10 @@ void preparePipeline(VulkanData *vkData)
 		.pInitialData = NULL
 	};
 
-	VkResult err;
 	VkPipelineCache pipelineCache;
-	err = vkCreatePipelineCache(vkData->device, &pipelineCacheCreateInfo, NULL, &pipelineCache);
-	if (err) ERR_EXIT("Unable to create pipeline cache for graphics pipeline.\nExiting...\n");
+	VK_CHECK(vkCreatePipelineCache(vkData->device, &pipelineCacheCreateInfo, NULL, &pipelineCache));
 
-	err = vkCreateGraphicsPipelines(vkData->device, pipelineCache, 1, &pipeline, NULL, &vkData->pipeline);
-	if (err) ERR_EXIT("Unable to create graphics pipeline.\nExiting...\n");
+	VK_CHECK(vkCreateGraphicsPipelines(vkData->device, pipelineCache, 1, &pipeline, NULL, &vkData->pipeline));
 
 	vkDestroyPipelineCache(vkData->device, pipelineCache, NULL);
 
@@ -745,13 +697,10 @@ void prepareFramebuffers(VulkanData *vkData)
 
 	vkData->framebuffers = malloc(vkData->swapchainImageCount * sizeof(VkFramebuffer));
 
-	VkResult err;
-
 	for (uint32_t i = 0; i < vkData->swapchainImageCount; ++i)
 	{
 		attachments[0] = vkData->buffers.imageViews[i];
-		err = vkCreateFramebuffer(vkData->device, &framebufferInfo, NULL, &vkData->framebuffers[i]);
-		if (err) ERR_EXIT("Unable to create swapchain framebuffer.\nExiting...\n");
+		VK_CHECK(vkCreateFramebuffer(vkData->device, &framebufferInfo, NULL, &vkData->framebuffers[i]));
 	}
 }
 
@@ -793,11 +742,9 @@ void buildCommandBuffers(VulkanData *vkData)
 
 	for (uint32_t i = 0; i < vkData->swapchainImageCount; ++i)
 	{
-		VkResult err;
 		renderPassBeginInfo.framebuffer = vkData->framebuffers[i];
 
-		err = vkBeginCommandBuffer(vkData->buffers.cmdBuffers[i], &cmdBufferInfo);
-		if (err) ERR_EXIT("Unable to begin swapchain image command buffer.\nExiting...\n");
+		VK_CHECK(vkBeginCommandBuffer(vkData->buffers.cmdBuffers[i], &cmdBufferInfo));
 
 		vkCmdBeginRenderPass(vkData->buffers.cmdBuffers[i], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
@@ -851,8 +798,7 @@ void buildCommandBuffers(VulkanData *vkData)
 
 		vkCmdPipelineBarrier(vkData->buffers.cmdBuffers[i], VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, NULL, 0, NULL, 1, &prePresentBarrier);
 
-		err = vkEndCommandBuffer(vkData->buffers.cmdBuffers[i]);
-		if (err) ERR_EXIT("Error ending recording of draw command buffer.\nExiting...\n");
+		VK_CHECK(vkEndCommandBuffer(vkData->buffers.cmdBuffers[i]));
 	}
 }
 
@@ -881,7 +827,6 @@ void prepareVK(VulkanData *vkData)
 void initVK(VulkanData *vkData)
 {
 	//Query for required Vulkan extensions
-	VkResult err;
 	uint32_t requiredExtensionCount;
 	const char** requiredExtensions;
 	vkData->enabledExtensionCount = 0;
@@ -916,21 +861,18 @@ void initVK(VulkanData *vkData)
 	};
 
 	//Creating Vulkan Instance
-	err = vkCreateInstance(&instanceInfo, NULL, &vkData->instance);
-	if (err) ERR_EXIT("Failed to create Vulkan instance.\nExiting...\n");
+	VK_CHECK(vkCreateInstance(&instanceInfo, NULL, &vkData->instance));
 
 	//Enumerating physcial devices
 	uint32_t physicalDeviceCount;
-	err = vkEnumeratePhysicalDevices(vkData->instance, &physicalDeviceCount, NULL);
-	if (err) ERR_EXIT("Failed to query the number of physical devices present.\nExiting...\n");
+	VK_CHECK(vkEnumeratePhysicalDevices(vkData->instance, &physicalDeviceCount, NULL));
 	if (physicalDeviceCount == 0) ERR_EXIT("No physcial devices were found with Vulkan support.\nExiting...\n");
 
 	printf("Number of physical devices: %u\n", physicalDeviceCount);
 
 	//Selecting the render device
 	VkPhysicalDevice *physicalDevices = malloc(sizeof(VkPhysicalDevice) * physicalDeviceCount);
-	err = vkEnumeratePhysicalDevices(vkData->instance, &physicalDeviceCount, physicalDevices);
-	if (err) ERR_EXIT("Failed to retrieve physcial device properties.\nExiting...\n");
+	VK_CHECK(vkEnumeratePhysicalDevices(vkData->instance, &physicalDeviceCount, physicalDevices));
 	
 	//Just grabbing the first device present
 	vkData->physicalDevice = physicalDevices[0];
@@ -943,14 +885,12 @@ void initVK(VulkanData *vkData)
 	bool swapchainExtFound = false;
 	vkData->enabledExtensionCount = 0;
 
-	err = vkEnumerateDeviceExtensionProperties(vkData->physicalDevice, NULL, &deviceExtensionCount, NULL);
-	if (err) ERR_EXIT("Unable to query device extensions.\nExiting...\n");
+	VK_CHECK(vkEnumerateDeviceExtensionProperties(vkData->physicalDevice, NULL, &deviceExtensionCount, NULL));
 
 	if (deviceExtensionCount > 0)
 	{
 		VkExtensionProperties *deviceExtensionProps = malloc(deviceExtensionCount * sizeof(VkExtensionProperties));
-		err = vkEnumerateDeviceExtensionProperties(vkData->physicalDevice, NULL, &deviceExtensionCount, deviceExtensionProps);
-		if (err) ERR_EXIT("Unable to query device extension properties.\nExiting...\n");
+		VK_CHECK(vkEnumerateDeviceExtensionProperties(vkData->physicalDevice, NULL, &deviceExtensionCount, deviceExtensionProps));
 
 		for (uint32_t i = 0; i < deviceExtensionCount && !swapchainExtFound; ++i)
 		{
@@ -981,8 +921,6 @@ void initVK(VulkanData *vkData)
 
 void initDevice(VulkanData *vkData)
 {
-	VkResult err;
-
 	float queuePriorities[1] = {0.0f};
 
 	VkDeviceQueueCreateInfo queue = {
@@ -1006,8 +944,7 @@ void initDevice(VulkanData *vkData)
 		.ppEnabledExtensionNames = vkData->enabledExtensions
 	};
 
-	err = vkCreateDevice(vkData->physicalDevice, &device, NULL, &vkData->device);
-	if (err) ERR_EXIT("Failed to create a Vulkan device.\nExiting...\n");
+	VK_CHECK(vkCreateDevice(vkData->physicalDevice, &device, NULL, &vkData->device));
 
 	GET_DEVICE_PROC_ADDR(vkData, CreateSwapchainKHR);
 	GET_DEVICE_PROC_ADDR(vkData, DestroySwapchainKHR);
@@ -1020,8 +957,6 @@ void initSurface(VulkanData *vkData, GLFWwindow *window)
 {
 	glfwCreateWindowSurface(vkData->instance, window, NULL, &vkData->surface);
 	
-	VkResult err;
-
 	VkBool32 *supportsPresent = malloc(vkData->queueCount * sizeof(VkBool32));
 	for (uint32_t i = 0; i < vkData->queueCount; ++i)
 		vkData->fpGetPhysicalDeviceSurfaceSupportKHR(vkData->physicalDevice, i, vkData->surface, &supportsPresent[i]);
@@ -1071,13 +1006,11 @@ void initSurface(VulkanData *vkData, GLFWwindow *window)
 	vkGetDeviceQueue(vkData->device, vkData->graphicsQueueNodeIndex, 0, &vkData->queue);
 
 	uint32_t formatCount;
-	err = vkData->fpGetPhysicalDeviceSurfaceFormatsKHR(vkData->physicalDevice, vkData->surface, &formatCount, NULL);
-	if (err) ERR_EXIT("Unable to query physical device surface formats.\nExiting...\n");
+	VK_CHECK(vkData->fpGetPhysicalDeviceSurfaceFormatsKHR(vkData->physicalDevice, vkData->surface, &formatCount, NULL));
 	if (formatCount == 0) ERR_EXIT("No surface formats were found.\nExiting...\n");
 
 	VkSurfaceFormatKHR *surfaceFormats = malloc(formatCount * sizeof(VkSurfaceFormatKHR));
-	err = vkData->fpGetPhysicalDeviceSurfaceFormatsKHR(vkData->physicalDevice, vkData->surface, &formatCount, surfaceFormats);
-	if (err) ERR_EXIT("Unable to retrieve physical device surface formats.\nExiting...\n");
+	VK_CHECK(vkData->fpGetPhysicalDeviceSurfaceFormatsKHR(vkData->physicalDevice, vkData->surface, &formatCount, surfaceFormats));
 
 	if (formatCount == 1 && surfaceFormats[0].format == VK_FORMAT_UNDEFINED) vkData->format = VK_FORMAT_B8G8R8A8_UNORM;
 	else vkData->format = surfaceFormats[0].format;
@@ -1158,15 +1091,11 @@ void drawVK(VulkanData *vkData)
 		.pInheritanceInfo = NULL
 	};
 
-	VkResult err;
-
-	err = vkBeginCommandBuffer(vkData->postPresentCmdBuffer, &cmdBufferInfo);
-	if (err) ERR_EXIT("Unable to start post present command buffer.\nExiting...\n");
+	VK_CHECK(vkBeginCommandBuffer(vkData->postPresentCmdBuffer, &cmdBufferInfo));
 
 	vkCmdPipelineBarrier(vkData->postPresentCmdBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0, 0, NULL, 0, NULL, 1, &postPresentBarrier);
 
-	err = vkEndCommandBuffer(vkData->postPresentCmdBuffer);
-	if (err) ERR_EXIT("Unable to end post present command buffer.\nExiting...\n");
+	VK_CHECK(vkEndCommandBuffer(vkData->postPresentCmdBuffer));
 
 	VkSubmitInfo submitInfo = {
 		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
@@ -1180,11 +1109,9 @@ void drawVK(VulkanData *vkData)
 		.pSignalSemaphores = NULL
 	};
 
-	err = vkQueueSubmit(vkData->queue, 1, &submitInfo, VK_NULL_HANDLE);
-	if (err) ERR_EXIT("Unable to submit post present command buffer to queue.\nExiting...\n");
+	VK_CHECK(vkQueueSubmit(vkData->queue, 1, &submitInfo, VK_NULL_HANDLE));
 
-	err = vkQueueWaitIdle(vkData->queue);
-	if (err) ERR_EXIT("Error while waiting for queue to be idle.\nExiting...\n");
+	VK_CHECK(vkQueueWaitIdle(vkData->queue));
 
 	VkPipelineStageFlags pipelineStages = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
 	
@@ -1196,8 +1123,7 @@ void drawVK(VulkanData *vkData)
 	submitInfo.signalSemaphoreCount = 1;
 	submitInfo.pSignalSemaphores = &vkData->semaphores.renderComplete;
 
-	err = vkQueueSubmit(vkData->queue, 1, &submitInfo, VK_NULL_HANDLE);
-	if (err) ERR_EXIT("Unable to submit draw command buffer to queue.\nExiting...\n");
+	VK_CHECK(vkQueueSubmit(vkData->queue, 1, &submitInfo, VK_NULL_HANDLE));
 
 	VkPresentInfoKHR presentInfo = {
 		.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
@@ -1210,8 +1136,7 @@ void drawVK(VulkanData *vkData)
 		.pResults = NULL
 	};
 
-	err = vkData->fpQueuePresentKHR(vkData->queue, &presentInfo);
-	if (err) ERR_EXIT("Unable to present swapchain image.\nExiting...\n");
+	VK_CHECK(vkData->fpQueuePresentKHR(vkData->queue, &presentInfo));
 }
 
 void runWindow(Window *window)
