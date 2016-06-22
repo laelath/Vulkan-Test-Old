@@ -598,8 +598,8 @@ void prepareRenderPass(VulkanData *vkData)
 		.pAttachments = attachments,
 		.subpassCount = 1,
 		.pSubpasses = subpasses,
-		.dependencyCount = 0,
-		.pDependencies = NULL
+		.dependencyCount = 1,
+		.pDependencies = dependencies
 	};
 
 	VK_CHECK(vkCreateRenderPass(vkData->device, &renderPassInfo, NULL, &vkData->renderPass));
@@ -792,10 +792,7 @@ void buildCommandBuffers(VulkanData *vkData)
 				.float32[0] = 0.0f,
 				.float32[1] = 0.0f,
 				.float32[2] = 0.0f,
-				.float32[3] = 0.0f },
-			.depthStencil = {
-				.depth = 0.0f,
-				.stencil = 0 }}
+				.float32[3] = 0.0f }}
 	};
 
 	VkRenderPassBeginInfo renderPassBeginInfo = {
@@ -889,8 +886,6 @@ void initVK(VulkanData *vkData)
 
 	vkData->enabledExtensionCount = requiredExtensionCount;
 	memcpy(vkData->enabledExtensions, requiredExtensions, sizeof(requiredExtensions[0]) * requiredExtensionCount);
-	//for (uint32_t i = 0; i < requiredExtensionCount; ++i)
-	//	vkData->enabledExtensions[i] = requiredExtensions[i];
 
 	//Create Vulkan Instance
 	VkApplicationInfo appInfo = {
