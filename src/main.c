@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <stdbool.h>
 
 //#define GLFW_INCLUDE_VULKAN
@@ -215,7 +216,10 @@ void setupSwapchain(VulkanData *vkData)
 	VkPresentModeKHR *presentModes = malloc(presentModeCount * sizeof(VkPresentModeKHR));
 	VK_CHECK(vkData->fpGetPhysicalDeviceSurfacePresentModesKHR(vkData->physicalDevice, vkData->surface, &presentModeCount, presentModes));*/
 
-	VkPresentModeKHR swapchainPresentMode = VK_PRESENT_MODE_FIFO_KHR;
+	VkPresentModeKHR swapchainPresentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+	//VkPresentModeKHR swapchainPresentMode = VK_PRESENT_MODE_MAILBOX_KHR;
+	//VkPresentModeKHR swapchainPresentMode = VK_PRESENT_MODE_FIFO_KHR;
+	//VkPresentModeKHR swapchainPresentMode = VK_PRESENT_MODE_FIFO_RELAXED_KHR;
 
 	uint32_t desiredNumberOfSwapchainImages = surfaceCapabilities.minImageCount + 1;
 	if (surfaceCapabilities.maxImageCount > 0 && desiredNumberOfSwapchainImages > surfaceCapabilities.maxImageCount)
@@ -267,7 +271,7 @@ void setupSwapchain(VulkanData *vkData)
 	for (uint32_t i = 0; i < vkData->swapchainImageCount; ++i)
 	{
 		vkData->buffers.images[i] = swapchainImages[i];
-		setImageLayout(vkData->setupCmdBuffer, vkData->buffers.images[i], VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+		//setImageLayout(vkData->setupCmdBuffer, vkData->buffers.images[i], VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
 		VkImageViewCreateInfo colorAttachmentView = {
 			.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -1107,12 +1111,19 @@ void resizeVK(VulkanData *vkData)
 {
 	printf("Resizing window.\n");
 	destroySwapchain(vkData);
+
+	VK_CHECK(vkQueueWaitIdle(vkData->queue));
+	VK_CHECK(vkDeviceWaitIdle(vkData->device));
+
 	prepareVK(vkData);
 }
 
 void drawVK(VulkanData *vkData)
 {
 	vkData->fpAcquireNextImageKHR(vkData->device, vkData->swapchain, UINT64_MAX, vkData->semaphores.presentComplete, NULL, &vkData->currentBuffer);
+	//vkData->fpAcquireNextImageKHR(vkData->device, vkData->swapchain, 0, vkData->semaphores.presentComplete, NULL, &vkData->currentBuffer);
+	
+	VK_CHECK(vkQueueWaitIdle(vkData->queue));
 
 	VkPipelineStageFlags pipelineStages = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
 	
@@ -1146,9 +1157,17 @@ void drawVK(VulkanData *vkData)
 
 void runWindow(Window *window)
 {
+	clock_t oldTime = clock();
+
 	while (!glfwWindowShouldClose(window->glfwWindow))
 	{
 		glfwPollEvents();
+
+		clock_t time = clock();
+		float dt = ((float) (time - oldTime)) / CLOCKS_PER_SEC;
+		oldTime = time;
+
+		//printf("Frames per second: %f\n", 1.0 / dt);
 
 		drawVK(&window->vkData);
 
