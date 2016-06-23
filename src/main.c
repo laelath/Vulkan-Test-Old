@@ -9,17 +9,11 @@
 #include <GLFW/glfw3.h>
 
 #include "vktools.h"
+#include "vkswapchain.h"
 
 #define VERTEX_BUFFER_BIND_ID 0
 
-#define ERR_EXIT(err_msg) \
-{ \
-	printf(err_msg); \
-	fflush(stdout); \
-	exit(1); \
-}
-
-#define GET_INSTANCE_PROC_ADDR(vkData, entrypoint) \
+/*#define GET_INSTANCE_PROC_ADDR(vkData, entrypoint) \
 { \
 	vkData->fp##entrypoint = (PFN_vk##entrypoint)vkGetInstanceProcAddr(vkData->instance, "vk" #entrypoint); \
 	if (vkData->fp##entrypoint == NULL) ERR_EXIT("vkGetInstanceProcAddr failed to find vk" #entrypoint ".\nExiting...\n"); \
@@ -29,13 +23,13 @@
 { \
 	vkData->fp##entrypoint = (PFN_vk##entrypoint)vkGetDeviceProcAddr(vkData->device, "vk" #entrypoint); \
 	if (vkData->fp##entrypoint == NULL) ERR_EXIT("vkGetDeviceProcAddr failed to find vk" #entrypoint ".\nExiting...\n"); \
-}
+}*/
 
-typedef struct _SwapchainBuffers {
+/*typedef struct _SwapchainBuffers {
 	VkImage *images;
 	VkCommandBuffer *cmdBuffers;
 	VkImageView *imageViews;
-} SwapchainBuffers;
+} SwapchainBuffers;*/
 
 typedef struct _VulkanData {
 	VkInstance instance;
@@ -48,28 +42,31 @@ typedef struct _VulkanData {
 	uint32_t queueCount;
 	uint32_t graphicsQueueNodeIndex;
 
-	VkSurfaceKHR surface;
+	uint32_t enabledExtensionCount;
+	const char* enabledExtensions[64];
+
+	VkCommandPool cmdPool;
+	VkCommandBuffer setupCmdBuffer;
+
+	/*VkSurfaceKHR surface;
 	VkFormat format;
 	VkColorSpaceKHR colorSpace;
 	VkSwapchainKHR swapchain;
 	uint32_t swapchainImageCount;
 	uint32_t currentBuffer;
 
-	uint32_t enabledExtensionCount;
-	const char* enabledExtensions[64];
-
 	uint32_t width;
 	uint32_t height;
 
-	VkCommandPool cmdPool;
-	VkCommandBuffer setupCmdBuffer;
-
 	VkFramebuffer *framebuffers;
-	SwapchainBuffers buffers;
+	SwapchainBuffers buffers;*/
 
 	VkRenderPass renderPass;
 	VkPipeline pipeline;
 	//VkPipelineLayout pipelineLayout;
+	
+	Swapchain swapchain;
+	VkCommandBuffer *drawCmdBuffers;
 	
 	struct {
 		VkSemaphore presentComplete;
@@ -90,7 +87,9 @@ typedef struct _VulkanData {
 		VkDeviceMemory memory;
 	} indices;
 
-	PFN_vkGetPhysicalDeviceSurfaceSupportKHR fpGetPhysicalDeviceSurfaceSupportKHR;
+	GLFWwindow *window;
+
+	/*PFN_vkGetPhysicalDeviceSurfaceSupportKHR fpGetPhysicalDeviceSurfaceSupportKHR;
 	PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR fpGetPhysicalDeviceSurfaceCapabilitiesKHR;
 	PFN_vkGetPhysicalDeviceSurfaceFormatsKHR fpGetPhysicalDeviceSurfaceFormatsKHR;
 	PFN_vkGetPhysicalDeviceSurfacePresentModesKHR fpGetPhysicalDeviceSurfacePresentModesKHR;
@@ -98,13 +97,13 @@ typedef struct _VulkanData {
 	PFN_vkDestroySwapchainKHR fpDestroySwapchainKHR;
 	PFN_vkGetSwapchainImagesKHR fpGetSwapchainImagesKHR;
 	PFN_vkAcquireNextImageKHR fpAcquireNextImageKHR;
-	PFN_vkQueuePresentKHR fpQueuePresentKHR;
+	PFN_vkQueuePresentKHR fpQueuePresentKHR;*/
 } VulkanData;
 
-typedef struct _Window {
+/*typedef struct _Window {
 	GLFWwindow* glfwWindow;
 	VulkanData vkData;
-} Window;
+} Window;*/
 
 static VkShaderModule loadShader(VulkanData *vkData, char *path)
 {
@@ -951,15 +950,15 @@ void initVK(VulkanData *vkData)
 		}
 	}
 
-	GET_INSTANCE_PROC_ADDR(vkData, GetPhysicalDeviceSurfaceSupportKHR);
-	GET_INSTANCE_PROC_ADDR(vkData, GetPhysicalDeviceSurfaceCapabilitiesKHR);
-	GET_INSTANCE_PROC_ADDR(vkData, GetPhysicalDeviceSurfaceFormatsKHR);
-	GET_INSTANCE_PROC_ADDR(vkData, GetPhysicalDeviceSurfacePresentModesKHR);
-	GET_INSTANCE_PROC_ADDR(vkData, CreateSwapchainKHR);
-	GET_INSTANCE_PROC_ADDR(vkData, DestroySwapchainKHR);
-	GET_INSTANCE_PROC_ADDR(vkData, GetSwapchainImagesKHR);
-	GET_INSTANCE_PROC_ADDR(vkData, AcquireNextImageKHR);
-	GET_INSTANCE_PROC_ADDR(vkData, QueuePresentKHR);
+	//GET_INSTANCE_PROC_ADDR(vkData, GetPhysicalDeviceSurfaceSupportKHR);
+	//GET_INSTANCE_PROC_ADDR(vkData, GetPhysicalDeviceSurfaceCapabilitiesKHR);
+	//GET_INSTANCE_PROC_ADDR(vkData, GetPhysicalDeviceSurfaceFormatsKHR);
+	//GET_INSTANCE_PROC_ADDR(vkData, GetPhysicalDeviceSurfacePresentModesKHR);
+	//GET_INSTANCE_PROC_ADDR(vkData, CreateSwapchainKHR);
+	//GET_INSTANCE_PROC_ADDR(vkData, DestroySwapchainKHR);
+	//GET_INSTANCE_PROC_ADDR(vkData, GetSwapchainImagesKHR);
+	//GET_INSTANCE_PROC_ADDR(vkData, AcquireNextImageKHR);
+	//GET_INSTANCE_PROC_ADDR(vkData, QueuePresentKHR);
 
 	vkGetPhysicalDeviceQueueFamilyProperties(vkData->physicalDevice, &vkData->queueCount, NULL);
 	if(vkData->queueCount == 0) ERR_EXIT("No device queue was found.\nExiting...\n");
@@ -995,11 +994,11 @@ void initDevice(VulkanData *vkData)
 
 	VK_CHECK(vkCreateDevice(vkData->physicalDevice, &device, NULL, &vkData->device));
 
-	GET_DEVICE_PROC_ADDR(vkData, CreateSwapchainKHR);
-	GET_DEVICE_PROC_ADDR(vkData, DestroySwapchainKHR);
-	GET_DEVICE_PROC_ADDR(vkData, GetSwapchainImagesKHR);
-	GET_DEVICE_PROC_ADDR(vkData, AcquireNextImageKHR);
-	GET_DEVICE_PROC_ADDR(vkData, QueuePresentKHR);
+	//GET_DEVICE_PROC_ADDR(vkData, CreateSwapchainKHR);
+	//GET_DEVICE_PROC_ADDR(vkData, DestroySwapchainKHR);
+	//GET_DEVICE_PROC_ADDR(vkData, GetSwapchainImagesKHR);
+	//GET_DEVICE_PROC_ADDR(vkData, AcquireNextImageKHR);
+	//GET_DEVICE_PROC_ADDR(vkData, QueuePresentKHR);
 }
 
 void initSurface(VulkanData *vkData, GLFWwindow *window)

@@ -8,6 +8,13 @@
 
 const char * getVkResultString(VkResult err);
 
+#define ERR_EXIT(err_msg) \
+{ \
+	printf(err_msg); \
+	fflush(stdout); \
+	exit(1); \
+}
+
 #define VK_CHECK(f) \
 { \
 	VkResult err = (f); \
