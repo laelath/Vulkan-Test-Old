@@ -4,10 +4,10 @@
 #include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
 
-typedef struct _SwapchainBuffer {
+typedef struct _SwapchainBuffers {
 	VkImage image;
 	VkImageView view;
-} SwapchainBuffer;
+} SwapchainBuffers;
 
 typedef struct _Swapchain {
 	VkSurfaceKHR surface;
@@ -21,7 +21,9 @@ typedef struct _Swapchain {
 	uint32_t height;
 
 	VkFramebuffer *framebuffers;
-	SwapchainBuffer buffers;
+	SwapchainBuffers buffers;
+
+	VkPresentInfoKHR presentInfo;
 
 	PFN_vkGetPhysicalDeviceSurfaceSupportKHR fpGetPhysicalDeviceSurfaceSupportKHR;
 	PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR fpGetPhysicalDeviceSurfaceCapabilitiesKHR;
@@ -32,15 +34,26 @@ typedef struct _Swapchain {
 	PFN_vkGetSwapchainImagesKHR fpGetSwapchainImagesKHR;
 	PFN_vkAcquireNextImageKHR fpAcquireNextImageKHR;
 	PFN_vkQueuePresentKHR fpQueuePresentKHR;
+
+	VkInstance instance;
+	VkPhysicalDevice physicalDevice;
+	VkDevice device;
+	VkQueue queue;
 } Swapchain;
 
-void loadInstanceFunctions(VkInstance instance, Swapchain *swapchain);
-void loadDeviceFunctions(VkDevice device, Swapchain *swapchain);
+void initSwapchainInstance(Swapchain *swapchain, VkInstance instance, VkPhysicalDevice physicalDevice);
+void initSwapchainDevice(Swapchain *swapchain, VkDevice device, VkQueue queue);
 
-void createSurface(VkInstance instance, VkPhysicalDevice physicalDevice, GLFWwindow *window, Swapchain *swapchain);
-uint32_t getSwapchainQueueIndex(VkPhysicalDevice physicalDevice, Swapchain *swapchain);
+void loadInstanceFunctions(Swapchain *swapchain);
+void loadDeviceFunctions(Swapchain *swapchain);
 
-void setupBuffers(VkPhysicalDevice physicalDevice, VkDevice device, Swapchain *swapchain);
+void createSurface(Swapchain *swapchain, GLFWwindow *window);
+uint32_t getSwapchainQueueIndex(Swapchain *swapchain);
+
+void setupSwapchainBuffers(Swapchain *swapchain);
+
+uint32_t acquireNextImage(Swapchain *swapchain, uint64_t timeout, VkSeamphore waitSemaphore);
+void presentQueue(Swapchain *swapchain, VkSemaphore waitSemaphore);
 
 void resizeSwapchain(Swapchain *swapchain);
 
