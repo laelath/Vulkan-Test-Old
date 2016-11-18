@@ -4,13 +4,15 @@
 #define GET_INSTANCE_PROC_ADDR(swapchain, instance, entrypoint) \
 { \
 	swapchain->fp##entrypoint = (PFN_vk##entrypoint)vkGetInstanceProcAddr(instance, "vk" #entrypoint); \
-	if (swapchain->fp##entrypoint == NULL) ERR_EXIT("vkGetInstanceProcAddr failed to find vk" #entrypoint ".\nExiting...\n"); \
+	if (swapchain->fp##entrypoint == NULL) \
+		ERR_EXIT("vkGetInstanceProcAddr failed to find vk" #entrypoint ".\nExiting...\n"); \
 }
 
 #define GET_DEVICE_PROC_ADDR(swapchain, device, entrypoint) \
 { \
 	swapchain->fp##entrypoint = (PFN_vk##entrypoint)vkGetDeviceProcAddr(device, "vk" #entrypoint); \
-	if (swapchain->fp##entrypoint == NULL) ERR_EXIT("vkGetDeviceProcAddr failed to find vk" #entrypoint ".\nExiting...\n"); \
+	if (swapchain->fp##entrypoint == NULL) \
+		ERR_EXIT("vkGetDeviceProcAddr failed to find vk" #entrypoint ".\nExiting...\n"); \
 }
 
 void loadInstanceFunctions(Swapchain *swapchain, VkInstance instance)
@@ -40,14 +42,18 @@ void createSurface(Swapchain *swapchain, GLFWwindow *window)
 	glfwCreateWindowSurface(swapchain->instance, window, NULL, &swapchain->surface);
 
 	uint32_t formatCount;
-	VK_CHECK(swapchain->fpGetPhysicalDeviceSurfaceFormatsKHR(swapchain->physicalDevice, swapchain->surface, &formatCount, NULL));
+	VK_CHECK(swapchain->fpGetPhysicalDeviceSurfaceFormatsKHR(swapchain->physicalDevice, swapchain->surface,
+				&formatCount, NULL));
 	if (formatCount == 0) ERR_EXIT("No surface formats were found.\nExiting...\n");
 
 	VkSurfaceFormatKHR *surfaceFormats = malloc(formatCount * sizeof(VkSurfaceFormatKHR));
-	VK_CHECK(swapchain->fpGetPhysicalDeviceSurfaceFormatsKHR(swapchain->physicalDevice, swapchain->surface, &formatCount, surfaceFormats));
+	VK_CHECK(swapchain->fpGetPhysicalDeviceSurfaceFormatsKHR(swapchain->physicalDevice, swapchain->surface,
+				&formatCount, surfaceFormats));
 
-	if (formatCount == 1 && surfaceFormats[0].format == VK_FORMAT_UNDEFINED) swapchain->format = VK_FORMAT_B8G8R8A8_UNORM;
-	else swapchain->format = surfaceFormats[0].format;
+	if (formatCount == 1 && surfaceFormats[0].format == VK_FORMAT_UNDEFINED)
+		swapchain->format = VK_FORMAT_B8G8R8A8_UNORM;
+	else
+		swapchain->format = surfaceFormats[0].format;
 
 	swapchain->colorSpace = surfaceFormats[0].colorSpace;
 
@@ -65,20 +71,18 @@ uint32_t getSwapchainQueueIndex(Swapchain *swapchain)
 
 	VkBool32 *supportsPresent = malloc(queueCount * sizeof(VkBool32));
 	for (uint32_t i = 0; i < queueCount; ++i)
-		swapchain->fpGetPhysicalDeviceSurfaceSupportKHR(swapchain->physicalDevice, i, swapchain->surface, &supportsPresent[i]);
+		swapchain->fpGetPhysicalDeviceSurfaceSupportKHR(swapchain->physicalDevice, i, swapchain->surface,
+				&supportsPresent[i]);
 
 	uint32_t graphicsQueueNodeIndex = UINT32_MAX;
 	uint32_t presentQueueNodeIndex = UINT32_MAX;
 	bool foundQueue = false;
-	for (uint32_t i = 0; i < queueCount && !foundQueue; ++i)
-	{
-		if ((queueProps[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0)
-		{
+	for (uint32_t i = 0; i < queueCount && !foundQueue; ++i) {
+		if ((queueProps[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0) {
 			if (graphicsQueueNodeIndex == UINT32_MAX)
 				graphicsQueueNodeIndex = i;
 
-			if (supportsPresent[i] == VK_TRUE)
-			{
+			if (supportsPresent[i] == VK_TRUE) {
 				graphicsQueueNodeIndex = i;
 				presentQueueNodeIndex = i;
 				foundQueue = true;
@@ -86,13 +90,10 @@ uint32_t getSwapchainQueueIndex(Swapchain *swapchain)
 		}
 	}
 
-	if (presentQueueNodeIndex == UINT32_MAX)
-	{
+	if (presentQueueNodeIndex == UINT32_MAX) {
 		foundQueue = false;
-		for (uint32_t i = 0; i < queueCount && !foundQueue; ++i)
-		{
-			if (supportsPresent[i] == VK_TRUE)
-			{
+		for (uint32_t i = 0; i < queueCount && !foundQueue; ++i) {
+			if (supportsPresent[i] == VK_TRUE) {
 				presentQueueNodeIndex = i;
 				foundQueue = true;
 			}
@@ -102,9 +103,11 @@ uint32_t getSwapchainQueueIndex(Swapchain *swapchain)
 	free(supportsPresent);
 	free(queueProps);
 
-	if (graphicsQueueNodeIndex == UINT32_MAX || presentQueueNodeIndex == UINT32_MAX) ERR_EXIT("Could not find graphics and present queues.\nExiting...\n");
+	if (graphicsQueueNodeIndex == UINT32_MAX || presentQueueNodeIndex == UINT32_MAX)
+		ERR_EXIT("Could not find graphics and present queues.\nExiting...\n");
 	//Possible to use separate queues for graphics and present, but this implementation doesn't incude that
-	if (graphicsQueueNodeIndex != presentQueueNodeIndex) ERR_EXIT("Could not find a common graphics and present queue.\nExiting...\n");
+	if (graphicsQueueNodeIndex != presentQueueNodeIndex)
+		ERR_EXIT("Could not find a common graphics and present queue.\nExiting...\n");
 
 	return graphicsQueueNodeIndex;
 }
@@ -114,16 +117,14 @@ void setupSwapchainBuffers(Swapchain *swapchain)
 	VkSwapchainKHR oldSwapchain = swapchain->swapchain;
 
 	VkSurfaceCapabilitiesKHR surfaceCapabilities;
-	VK_CHECK(vkData->fpGetPhysicalDeviceSurfaceCapabilitiesKHR(swapchain->physicalDevice, swapchain->surface, &surfaceCapabilities));
+	VK_CHECK(vkData->fpGetPhysicalDeviceSurfaceCapabilitiesKHR(swapchain->physicalDevice, swapchain->surface,
+				&surfaceCapabilities));
 
 	VkExtent2D swapchainExtent;
-	if(surfaceCapabilities.currentExtent.width == (uint32_t)-1)
-	{
+	if(surfaceCapabilities.currentExtent.width == (uint32_t)-1) {
 		swapchainExtent.width = swapchain->width;
 		swapchainExtent.height = swapchain->height;
-	}
-	else
-	{
+	} else {
 		swapchainExtent = surfaceCapabilities.currentExtent;
 		swapchain->width = surfaceCapabilities.currentExtent.width;
 		swapchain->height = surfaceCapabilities.currentExtent.height;
@@ -132,10 +133,12 @@ void setupSwapchainBuffers(Swapchain *swapchain)
 	//printf("Creating surface, width: %u heiht: %u\n", vkData->width, vkData->height);
 
 	/*uint32_t presentModeCount;
-	VK_CHECK(vkData->fpGetPhysicalDeviceSurfacePresentModesKHR(vkData->physicalDevice, vkData->surface, &presentModeCount, NULL));
+	VK_CHECK(vkData->fpGetPhysicalDeviceSurfacePresentModesKHR(vkData->physicalDevice, vkData->surface,
+	&presentModeCount, NULL));
 
 	VkPresentModeKHR *presentModes = malloc(presentModeCount * sizeof(VkPresentModeKHR));
-	VK_CHECK(vkData->fpGetPhysicalDeviceSurfacePresentModesKHR(vkData->physicalDevice, vkData->surface, &presentModeCount, presentModes));*/
+	VK_CHECK(vkData->fpGetPhysicalDeviceSurfacePresentModesKHR(vkData->physicalDevice, vkData->surface,
+	&presentModeCount, presentModes));*/
 
 	VkPresentModeKHR swapchainPresentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
 	//VkPresentModeKHR swapchainPresentMode = VK_PRESENT_MODE_MAILBOX_KHR;
@@ -143,7 +146,8 @@ void setupSwapchainBuffers(Swapchain *swapchain)
 	//VkPresentModeKHR swapchainPresentMode = VK_PRESENT_MODE_FIFO_RELAXED_KHR;
 
 	uint32_t desiredNumberOfSwapchainImages = surfaceCapabilities.minImageCount + 1;
-	if (surfaceCapabilities.maxImageCount > 0 && desiredNumberOfSwapchainImages > surfaceCapabilities.maxImageCount)
+	if (surfaceCapabilities.maxImageCount > 0 &&
+			desiredNumberOfSwapchainImages > surfaceCapabilities.maxImageCount)
 		desiredNumberOfSwapchainImages = surfaceCapabilities.maxImageCount;
 
 	VkSurfaceTransformFlagsKHR preTransform;
@@ -175,22 +179,23 @@ void setupSwapchainBuffers(Swapchain *swapchain)
 
 	VK_CHECK(swapchain->fpCreateSwapchainKHR(swapchain->device, &swapchainInfo, NULL, &swapchain->swapchain));
 
-	if (oldSwapchain != VK_NULL_HANDLE)
-	{
+	if (oldSwapchain != VK_NULL_HANDLE) {
 		swapchain->fpDestroySwapchainKHR(swapchain->device, oldSwapchain, NULL);
 	}
 
-	VK_CHECK(swapchain->fpGetSwapchainImagesKHR(swapchain->device, swapchain->swapchain, &swapchain->imageCount, NULL));
+	VK_CHECK(swapchain->fpGetSwapchainImagesKHR(swapchain->device, swapchain->swapchain, &swapchain->imageCount,
+				NULL));
 
 	VkImage *swapchainImages = malloc(swapchain->imageCount * sizeof(VkImage));
-	VK_CHECK(swapchain->fpGetSwapchainImagesKHR(swapchain->device, swapchain->swapchain, &swapchain->imageCount, swapchainImages));
+	VK_CHECK(swapchain->fpGetSwapchainImagesKHR(swapchain->device, swapchain->swapchain, &swapchain->imageCount,
+				swapchainImages));
 
 	swapchain->buffers = malloc(swapchain->imageCount * sizeof(SwapchainBuffers));
 
-	for (uint32_t i = 0; i < vkData->swapchainImageCount; ++i)
-	{
+	for (uint32_t i = 0; i < vkData->swapchainImageCount; ++i) {
 		swapchain->buffers[i].image = swapchainImages[i];
-		//setImageLayout(vkData->setupCmdBuffer, vkData->buffers.images[i], VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+		//setImageLayout(vkData->setupCmdBuffer, vkData->buffers.images[i], VK_IMAGE_ASPECT_COLOR_BIT,
+		//VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
 		VkImageViewCreateInfo colorAttachmentView = {
 			.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -220,7 +225,8 @@ void setupSwapchainBuffers(Swapchain *swapchain)
 
 uint32_t acquireNextImage(Swapchain *swapchain, uint64_t timeout, VkSemaphore waitSemaphore)
 {
-	VK_CHECK(swapchain->fpAcquireNextImageKHR(swapchain->device, swapchain->swapchain, timeout, waitSemaphore, NULL, &swapchain->currentBuffer));
+	VK_CHECK(swapchain->fpAcquireNextImageKHR(swapchain->device, swapchain->swapchain, timeout, waitSemaphore,
+				NULL, &swapchain->currentBuffer));
 	return swapchain->currentBuffer;
 }
 
@@ -238,4 +244,46 @@ void presentQueue(Swapchain *swapchain, VkSemaphore waitSemaphore)
 	};
 
 	VK_CHECK(swapchain->fpQueuePresentKHR(swapchain->queue, &presentInfo));
+}
+
+void resizeSwapchain(Swapchain *swapchain)
+{
+	printf("Resizing window.\n");
+	destroySwapchain(swapchain);
+
+	VK_CHECK(vkQueueWaitIdle(swapchain->queue));
+	VK_CHECK(vkDeviceWaitIdle(swapchain->device));
+
+	prepare(vkData);
+}
+
+void destroySwapchain(Swapchain *swapchain)
+{
+	for (uint32_t i = 0; i < vkData->swapchainImageCount; ++i)
+		vkDestroyFramebuffer(vkData->device, vkData->framebuffers[i], NULL);
+
+	if (vkData->setupCmdBuffer != VK_NULL_HANDLE)
+		vkFreeCommandBuffers(vkData->device, vkData->cmdPool, 1, &vkData->setupCmdBuffer);
+
+	vkFreeCommandBuffers(vkData->device, vkData->cmdPool, vkData->swapchainImageCount, vkData->buffers.cmdBuffers);
+	vkDestroyCommandPool(vkData->device, vkData->cmdPool, NULL);
+
+	vkDestroyPipeline(vkData->device, vkData->pipeline, NULL);
+	vkDestroyRenderPass(vkData->device, vkData->renderPass, NULL);
+
+	vkDestroyBuffer(vkData->device, vkData->vertices.buffer, NULL);
+	vkFreeMemory(vkData->device, vkData->vertices.memory, NULL);
+
+	vkDestroyBuffer(vkData->device, vkData->indices.buffer, NULL);
+	vkFreeMemory(vkData->device, vkData->indices.memory, NULL);
+	
+	vkDestroySemaphore(vkData->device, vkData->semaphores.presentComplete, NULL);
+	vkDestroySemaphore(vkData->device, vkData->semaphores.renderComplete, NULL);
+
+	for (uint32_t i = 0; i < vkData->swapchainImageCount; ++i)
+		vkDestroyImageView(vkData->device, vkData->buffers.imageViews[i], NULL);
+
+	free(vkData->buffers.images);
+	free(vkData->buffers.cmdBuffers);
+	free(vkData->buffers.imageViews);
 }

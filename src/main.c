@@ -16,13 +16,15 @@
 /*#define GET_INSTANCE_PROC_ADDR(vkData, entrypoint) \
 { \
 	vkData->fp##entrypoint = (PFN_vk##entrypoint)vkGetInstanceProcAddr(vkData->instance, "vk" #entrypoint); \
-	if (vkData->fp##entrypoint == NULL) ERR_EXIT("vkGetInstanceProcAddr failed to find vk" #entrypoint ".\nExiting...\n"); \
+	if (vkData->fp##entrypoint == NULL)
+	ERR_EXIT("vkGetInstanceProcAddr failed to find vk" #entrypoint ".\nExiting...\n"); \
 }
 
 #define GET_DEVICE_PROC_ADDR(vkData, entrypoint) \
 { \
 	vkData->fp##entrypoint = (PFN_vk##entrypoint)vkGetDeviceProcAddr(vkData->device, "vk" #entrypoint); \
-	if (vkData->fp##entrypoint == NULL) ERR_EXIT("vkGetDeviceProcAddr failed to find vk" #entrypoint ".\nExiting...\n"); \
+	if (vkData->fp##entrypoint == NULL)
+	ERR_EXIT("vkGetDeviceProcAddr failed to find vk" #entrypoint ".\nExiting...\n"); \
 }*/
 
 /*typedef struct _SwapchainBuffers {
@@ -192,7 +194,8 @@ void setupSwapchain(VulkanData *vkData)
 	VkSwapchainKHR oldSwapchain = vkData->swapchain;
 
 	VkSurfaceCapabilitiesKHR surfaceCapabilities;
-	VK_CHECK(vkData->fpGetPhysicalDeviceSurfaceCapabilitiesKHR(vkData->physicalDevice, vkData->surface, &surfaceCapabilities));
+	VK_CHECK(vkData->fpGetPhysicalDeviceSurfaceCapabilitiesKHR(vkData->physicalDevice, vkData->surface,
+				&surfaceCapabilities));
 
 	VkExtent2D swapchainExtent;
 	if(surfaceCapabilities.currentExtent.width == (uint32_t)-1)
@@ -207,13 +210,15 @@ void setupSwapchain(VulkanData *vkData)
 		vkData->height = surfaceCapabilities.currentExtent.height;
 	}
 
-	printf("Creating surface, width: %u heiht: %u\n", vkData->width, vkData->height);
+	printf("Creating surface, width: %u height: %u\n", vkData->width, vkData->height);
 
 	/*uint32_t presentModeCount;
-	VK_CHECK(vkData->fpGetPhysicalDeviceSurfacePresentModesKHR(vkData->physicalDevice, vkData->surface, &presentModeCount, NULL));
+	VK_CHECK(vkData->fpGetPhysicalDeviceSurfacePresentModesKHR(vkData->physicalDevice, vkData->surface,
+	&presentModeCount, NULL));
 
 	VkPresentModeKHR *presentModes = malloc(presentModeCount * sizeof(VkPresentModeKHR));
-	VK_CHECK(vkData->fpGetPhysicalDeviceSurfacePresentModesKHR(vkData->physicalDevice, vkData->surface, &presentModeCount, presentModes));*/
+	VK_CHECK(vkData->fpGetPhysicalDeviceSurfacePresentModesKHR(vkData->physicalDevice, vkData->surface,
+	&presentModeCount, presentModes));*/
 
 	VkPresentModeKHR swapchainPresentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
 	//VkPresentModeKHR swapchainPresentMode = VK_PRESENT_MODE_MAILBOX_KHR;
@@ -221,7 +226,8 @@ void setupSwapchain(VulkanData *vkData)
 	//VkPresentModeKHR swapchainPresentMode = VK_PRESENT_MODE_FIFO_RELAXED_KHR;
 
 	uint32_t desiredNumberOfSwapchainImages = surfaceCapabilities.minImageCount + 1;
-	if (surfaceCapabilities.maxImageCount > 0 && desiredNumberOfSwapchainImages > surfaceCapabilities.maxImageCount)
+	if (surfaceCapabilities.maxImageCount > 0 &&
+			desiredNumberOfSwapchainImages > surfaceCapabilities.maxImageCount)
 		desiredNumberOfSwapchainImages = surfaceCapabilities.maxImageCount;
 
 	VkSurfaceTransformFlagsKHR preTransform;
@@ -258,10 +264,12 @@ void setupSwapchain(VulkanData *vkData)
 		vkData->fpDestroySwapchainKHR(vkData->device, oldSwapchain, NULL);
 	}
 
-	VK_CHECK(vkData->fpGetSwapchainImagesKHR(vkData->device, vkData->swapchain, &vkData->swapchainImageCount, NULL));
+	VK_CHECK(vkData->fpGetSwapchainImagesKHR(vkData->device, vkData->swapchain, &vkData->swapchainImageCount,
+				NULL));
 
 	VkImage *swapchainImages = malloc(vkData->swapchainImageCount * sizeof(VkImage));
-	VK_CHECK(vkData->fpGetSwapchainImagesKHR(vkData->device, vkData->swapchain, &vkData->swapchainImageCount, swapchainImages));
+	VK_CHECK(vkData->fpGetSwapchainImagesKHR(vkData->device, vkData->swapchain, &vkData->swapchainImageCount,
+				swapchainImages));
 
 	vkData->buffers.images = malloc(vkData->swapchainImageCount * sizeof(VkImage));
 	vkData->buffers.cmdBuffers = malloc(vkData->swapchainImageCount * sizeof(VkCommandBuffer));
@@ -270,7 +278,8 @@ void setupSwapchain(VulkanData *vkData)
 	for (uint32_t i = 0; i < vkData->swapchainImageCount; ++i)
 	{
 		vkData->buffers.images[i] = swapchainImages[i];
-		//setImageLayout(vkData->setupCmdBuffer, vkData->buffers.images[i], VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+		//setImageLayout(vkData->setupCmdBuffer, vkData->buffers.images[i], VK_IMAGE_ASPECT_COLOR_BIT,
+		//VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
 		VkImageViewCreateInfo colorAttachmentView = {
 			.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -370,21 +379,25 @@ void prepareVertices(VulkanData *vkData)
 
 	vkGetBufferMemoryRequirements(vkData->device, stagingBuffers.vertices.buffer, &memReqs);
 	memAllocInfo.allocationSize = memReqs.size;
-	if (!getMemoryTypeIndex(vkData->memoryProps, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, &memAllocInfo.memoryTypeIndex))
+	if (!getMemoryTypeIndex(vkData->memoryProps, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+				&memAllocInfo.memoryTypeIndex))
 		ERR_EXIT("Unable to find suitable memory type for vertex staging buffer.\nExiting...\n");
 
 	VK_CHECK(vkAllocateMemory(vkData->device, &memAllocInfo, NULL, &stagingBuffers.vertices.memory));
-	VK_CHECK(vkMapMemory(vkData->device, stagingBuffers.vertices.memory, 0, memAllocInfo.allocationSize, 0, &data));
+	VK_CHECK(vkMapMemory(vkData->device, stagingBuffers.vertices.memory, 0, memAllocInfo.allocationSize, 0,
+				&data));
 	memcpy(data, vertices, sizeof(vertices));
 	vkUnmapMemory(vkData->device, stagingBuffers.vertices.memory);
-	VK_CHECK(vkBindBufferMemory(vkData->device, stagingBuffers.vertices.buffer, stagingBuffers.vertices.memory, 0));
+	VK_CHECK(vkBindBufferMemory(vkData->device, stagingBuffers.vertices.buffer, stagingBuffers.vertices.memory,
+				0));
 
 	vertexBufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 	VK_CHECK(vkCreateBuffer(vkData->device, &vertexBufferInfo, NULL, &vkData->vertices.buffer));
 
 	vkGetBufferMemoryRequirements(vkData->device, vkData->vertices.buffer, &memReqs);
 	memAllocInfo.allocationSize = memReqs.size;
-	if (!getMemoryTypeIndex(vkData->memoryProps, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &memAllocInfo.memoryTypeIndex))
+	if (!getMemoryTypeIndex(vkData->memoryProps, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+				&memAllocInfo.memoryTypeIndex))
 		ERR_EXIT("Unable to find suitable memory type for vertex buffer.\nExiting...\n");
 
 	VK_CHECK(vkAllocateMemory(vkData->device, &memAllocInfo, NULL, &vkData->vertices.memory));
@@ -406,11 +419,13 @@ void prepareVertices(VulkanData *vkData)
 
 	vkGetBufferMemoryRequirements(vkData->device, stagingBuffers.indices.buffer, &memReqs);
 	memAllocInfo.allocationSize = memReqs.size;
-	if (!getMemoryTypeIndex(vkData->memoryProps, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, &memAllocInfo.memoryTypeIndex))
+	if (!getMemoryTypeIndex(vkData->memoryProps, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+				&memAllocInfo.memoryTypeIndex))
 		ERR_EXIT("Unable to find suitable memory type for index staging buffer.\nExiting...\n");
 
 	VK_CHECK(vkAllocateMemory(vkData->device, &memAllocInfo, NULL, &stagingBuffers.indices.memory));
-	VK_CHECK(vkMapMemory(vkData->device, stagingBuffers.indices.memory, 0, memAllocInfo.allocationSize, 0, &data));
+	VK_CHECK(vkMapMemory(vkData->device, stagingBuffers.indices.memory, 0, memAllocInfo.allocationSize, 0,
+				&data));
 	memcpy(data, indices, sizeof(indices));
 	vkUnmapMemory(vkData->device, stagingBuffers.indices.memory);
 	VK_CHECK(vkBindBufferMemory(vkData->device, stagingBuffers.indices.buffer, stagingBuffers.indices.memory, 0));
@@ -420,7 +435,8 @@ void prepareVertices(VulkanData *vkData)
 
 	vkGetBufferMemoryRequirements(vkData->device, vkData->indices.buffer, &memReqs);
 	memAllocInfo.allocationSize = memReqs.size;
-	if (!getMemoryTypeIndex(vkData->memoryProps, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &memAllocInfo.memoryTypeIndex))
+	if (!getMemoryTypeIndex(vkData->memoryProps, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+				&memAllocInfo.memoryTypeIndex))
 		ERR_EXIT("Unable to find suitable memory type for index buffer.\nExiting...\n");
 
 	VK_CHECK(vkAllocateMemory(vkData->device, &memAllocInfo, NULL, &vkData->indices.memory));
@@ -463,7 +479,8 @@ void prepareVertices(VulkanData *vkData)
 	vkGetBufferMemoryRequirements(vkData->device, vkData->vertices.buffer, &memReqs);
 
 	uint32_t memoryType;
-	if (!memoryTypeFromProperties(vkData, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, &memoryType))
+	if (!memoryTypeFromProperties(vkData,
+	memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, &memoryType))
 		ERR_EXIT("Unable to find suitable memory type for vertex buffer.\nExiting...\n");
 
 	VkMemoryAllocateInfo memAllocInfo = {
@@ -500,7 +517,8 @@ void prepareVertices(VulkanData *vkData)
 
 	vkGetBufferMemoryRequirements(vkData->device, vkData->indices.buffer, &memReqs);
 
-	if(!memoryTypeFromProperties(vkData, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, &memoryType))
+	if(!memoryTypeFromProperties(vkData,
+	memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, &memoryType))
 		ERR_EXIT("Unable t0 find suitable memory type for index buffer.\nExiting...\n");
 
 	memAllocInfo.allocationSize = memReqs.size;
@@ -842,7 +860,8 @@ void buildCommandBuffers(VulkanData *vkData)
 		vkCmdBindPipeline(vkData->buffers.cmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, vkData->pipeline);
 
 		VkDeviceSize offsets[1] = { 0 };
-		vkCmdBindVertexBuffers(vkData->buffers.cmdBuffers[i], VERTEX_BUFFER_BIND_ID, 1, &vkData->vertices.buffer, offsets);
+		vkCmdBindVertexBuffers(vkData->buffers.cmdBuffers[i], VERTEX_BUFFER_BIND_ID, 1, &vkData->vertices.buffer,
+				offsets);
 		vkCmdBindIndexBuffer(vkData->buffers.cmdBuffers[i], vkData->indices.buffer, 0, VK_INDEX_TYPE_UINT32);
 		vkCmdDrawIndexed(vkData->buffers.cmdBuffers[i], vkData->indices.count, 1, 0, 0, 1);
 		vkCmdEndRenderPass(vkData->buffers.cmdBuffers[i]);
@@ -937,8 +956,10 @@ void initVK(VulkanData *vkData)
 
 	if (deviceExtensionCount > 0)
 	{
-		VkExtensionProperties *deviceExtensionProps = malloc(deviceExtensionCount * sizeof(VkExtensionProperties));
-		VK_CHECK(vkEnumerateDeviceExtensionProperties(vkData->physicalDevice, NULL, &deviceExtensionCount, deviceExtensionProps));
+		VkExtensionProperties *deviceExtensionProps =
+			malloc(deviceExtensionCount * sizeof(VkExtensionProperties));
+		VK_CHECK(vkEnumerateDeviceExtensionProperties(
+					vkData->physicalDevice, NULL, &deviceExtensionCount, deviceExtensionProps));
 
 		for (uint32_t i = 0; i < deviceExtensionCount && !swapchainExtFound; ++i)
 		{
@@ -961,7 +982,8 @@ void initVK(VulkanData *vkData)
 	//GET_INSTANCE_PROC_ADDR(vkData, QueuePresentKHR);
 
 	vkGetPhysicalDeviceQueueFamilyProperties(vkData->physicalDevice, &vkData->queueCount, NULL);
-	if(vkData->queueCount == 0) ERR_EXIT("No device queue was found.\nExiting...\n");
+	if(vkData->queueCount == 0)
+		ERR_EXIT("No device queue was found.\nExiting...\n");
 
 	vkData->queueProps = malloc(vkData->queueCount * sizeof(VkQueueFamilyProperties));
 	vkGetPhysicalDeviceQueueFamilyProperties(vkData->physicalDevice, &vkData->queueCount, vkData->queueProps);
@@ -1007,11 +1029,12 @@ void initSurface(VulkanData *vkData, GLFWwindow *window)
 	
 	VkBool32 *supportsPresent = malloc(vkData->queueCount * sizeof(VkBool32));
 	for (uint32_t i = 0; i < vkData->queueCount; ++i)
-		vkData->fpGetPhysicalDeviceSurfaceSupportKHR(vkData->physicalDevice, i, vkData->surface, &supportsPresent[i]);
+		vkData->fpGetPhysicalDeviceSurfaceSupportKHR(
+				vkData->physicalDevice, i, vkData->surface, &supportsPresent[i]);
 
 	uint32_t graphicsQueueNodeIndex = UINT32_MAX;
 	uint32_t presentQueueNodeIndex = UINT32_MAX;
-	bool foundQueue = false;
+
 	for (uint32_t i = 0; i < vkData->queueCount && !foundQueue; ++i)
 	{
 		if ((vkData->queueProps[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0)
@@ -1030,22 +1053,23 @@ void initSurface(VulkanData *vkData, GLFWwindow *window)
 
 	if (presentQueueNodeIndex == UINT32_MAX)
 	{
-		foundQueue = false;
-		for (uint32_t i = 0; i < vkData->queueCount && !foundQueue; ++i)
+		for (uint32_t i = 0; i < vkData->queueCount; ++i)
 		{
 			if (supportsPresent[i] == VK_TRUE)
 			{
 				presentQueueNodeIndex = i;
-				foundQueue = true;
+				break;
 			}
 		}
 	}
 
 	free(supportsPresent);
 
-	if (graphicsQueueNodeIndex == UINT32_MAX || presentQueueNodeIndex == UINT32_MAX) ERR_EXIT("Could not find graphics and present queues.\nExiting...\n");
+	if (graphicsQueueNodeIndex == UINT32_MAX || presentQueueNodeIndex == UINT32_MAX)
+		ERR_EXIT("Could not find graphics and present queues.\nExiting...\n");
 	//Possible to use separate queues for graphics and present, but this implementation doesn't incude that
-	if (graphicsQueueNodeIndex != presentQueueNodeIndex) ERR_EXIT("Could not find a common graphics and present queue.\nExiting...\n");
+	if (graphicsQueueNodeIndex != presentQueueNodeIndex)
+		ERR_EXIT("Could not find a common graphics and present queue.\nExiting...\n");
 
 	vkData->graphicsQueueNodeIndex = graphicsQueueNodeIndex;
 
@@ -1054,14 +1078,19 @@ void initSurface(VulkanData *vkData, GLFWwindow *window)
 	vkGetDeviceQueue(vkData->device, vkData->graphicsQueueNodeIndex, 0, &vkData->queue);
 
 	uint32_t formatCount;
-	VK_CHECK(vkData->fpGetPhysicalDeviceSurfaceFormatsKHR(vkData->physicalDevice, vkData->surface, &formatCount, NULL));
-	if (formatCount == 0) ERR_EXIT("No surface formats were found.\nExiting...\n");
+	VK_CHECK(vkData->fpGetPhysicalDeviceSurfaceFormatsKHR(
+				vkData->physicalDevice, vkData->surface, &formatCount, NULL));
+	if (formatCount == 0)
+		ERR_EXIT("No surface formats were found.\nExiting...\n");
 
 	VkSurfaceFormatKHR *surfaceFormats = malloc(formatCount * sizeof(VkSurfaceFormatKHR));
-	VK_CHECK(vkData->fpGetPhysicalDeviceSurfaceFormatsKHR(vkData->physicalDevice, vkData->surface, &formatCount, surfaceFormats));
+	VK_CHECK(vkData->fpGetPhysicalDeviceSurfaceFormatsKHR(
+				vkData->physicalDevice, vkData->surface, &formatCount, surfaceFormats));
 
-	if (formatCount == 1 && surfaceFormats[0].format == VK_FORMAT_UNDEFINED) vkData->format = VK_FORMAT_B8G8R8A8_UNORM;
-	else vkData->format = surfaceFormats[0].format;
+	if (formatCount == 1 && surfaceFormats[0].format == VK_FORMAT_UNDEFINED)
+		vkData->format = VK_FORMAT_B8G8R8A8_UNORM;
+	else
+		vkData->format = surfaceFormats[0].format;
 
 	vkData->colorSpace = surfaceFormats[0].colorSpace;
 
@@ -1078,7 +1107,8 @@ void destroySwapchain(VulkanData *vkData)
 	if (vkData->setupCmdBuffer != VK_NULL_HANDLE)
 		vkFreeCommandBuffers(vkData->device, vkData->cmdPool, 1, &vkData->setupCmdBuffer);
 
-	vkFreeCommandBuffers(vkData->device, vkData->cmdPool, vkData->swapchainImageCount, vkData->buffers.cmdBuffers);
+	vkFreeCommandBuffers(vkData->device, vkData->cmdPool,
+			vkData->swapchainImageCount, vkData->buffers.cmdBuffers);
 	vkDestroyCommandPool(vkData->device, vkData->cmdPool, NULL);
 
 	vkDestroyPipeline(vkData->device, vkData->pipeline, NULL);
@@ -1114,8 +1144,10 @@ void resizeVK(VulkanData *vkData)
 
 void drawVK(VulkanData *vkData)
 {
-	vkData->fpAcquireNextImageKHR(vkData->device, vkData->swapchain, UINT64_MAX, vkData->semaphores.presentComplete, NULL, &vkData->currentBuffer);
-	//vkData->fpAcquireNextImageKHR(vkData->device, vkData->swapchain, 0, vkData->semaphores.presentComplete, NULL, &vkData->currentBuffer);
+	vkData->fpAcquireNextImageKHR(vkData->device, vkData->swapchain, UINT64_MAX,
+			vkData->semaphores.presentComplete, NULL, &vkData->currentBuffer);
+	//vkData->fpAcquireNextImageKHR(vkData->device, vkData->swapchain, 0,
+	//		vkData->semaphores.presentComplete, NULL, &vkData->currentBuffer);
 	
 	VK_CHECK(vkQueueWaitIdle(vkData->queue));
 
@@ -1196,8 +1228,10 @@ void initWindow(Window *window)
 
 	glfwSetErrorCallback(error_callback);
 
-	if(!glfwInit()) ERR_EXIT("Cannot initialize GLFW.\nExiting...\n");
-	if(!glfwVulkanSupported()) ERR_EXIT("GLFW failed to find the Vulkan loader, do you have the most recent driver?\nExiting...\n");
+	if(!glfwInit())
+		ERR_EXIT("Cannot initialize GLFW.\nExiting...\n");
+	if(!glfwVulkanSupported())
+		ERR_EXIT("GLFW failed to find the Vulkan loader, do you have the most recent driver?\nExiting...\n");
 
 	window->vkData.width = 300;
 	window->vkData.height = 300;
@@ -1205,8 +1239,10 @@ void initWindow(Window *window)
 	initVK(&window->vkData);
 	
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-	window->glfwWindow = glfwCreateWindow(window->vkData.width, window->vkData.height, "Vulkan Test Program", NULL, NULL);
-	if (!window->glfwWindow) ERR_EXIT("Failed to create GLFW window.\nExiting...\n");
+	window->glfwWindow = glfwCreateWindow(window->vkData.width, window->vkData.height,
+			"Vulkan Test Program", NULL, NULL);
+	if (!window->glfwWindow)
+		ERR_EXIT("Failed to create GLFW window.\nExiting...\n");
 
 	glfwSetWindowUserPointer(window->glfwWindow, &window->vkData);
 	//glfwSetWindowRefreshCallback(window->glfwWindow, );
